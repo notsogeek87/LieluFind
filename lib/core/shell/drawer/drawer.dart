@@ -219,7 +219,7 @@ final class _DrawerHeader extends StatelessWidget {
               Icon(Icons.pin_drop, size: 28, color: theme.colorScheme.primary),
               const SizedBox(width: 10),
               Text(
-                'Dawarich',
+                'LieluFind',
                 style: theme.textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.w800,
                   letterSpacing: -0.3,
@@ -518,7 +518,7 @@ final class _BottomSection extends StatelessWidget {
                       ),
                       const SizedBox(width: 6),
                       Text(
-                        'Dawarich $version',
+                        'LieluFind $version',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.textTheme.bodySmall?.color
                               ?.withValues(alpha: 0.5),

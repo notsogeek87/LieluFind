@@ -62,7 +62,7 @@ class Dawarich extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
     return MaterialApp.router(
-        title: 'Dawarich',
+        title: 'LieluFind',
         theme: LightTheme.primaryTheme,
         darkTheme: DarkTheme.primaryTheme,
         themeMode: themeMode,

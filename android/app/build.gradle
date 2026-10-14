@@ -100,7 +100,7 @@ android {
             }
 
             // Distinct launcher name.
-            resValue "string", "app_name", "Dawarich (Dev)"
+            resValue "string", "app_name", "LieluFind (Dev)"
         }
     }
 

@@ -30,7 +30,7 @@ final class CompatRulesRemoteDataSource
           extra: {'skipAuth': true},
           headers: {
             'Accept': 'text/plain',
-            'User-Agent': 'Dawarich/1.0',
+            'User-Agent': 'LieluFind/1.0',
           },
           responseType: ResponseType.plain,
         ),
@@ -89,7 +89,7 @@ final class CompatRulesRemoteDataSource
           extra: {'skipAuth': true},
           headers: {
             'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': 'Dawarich/1.0',
+            'User-Agent': 'LieluFind/1.0',
           },
         ),
       );

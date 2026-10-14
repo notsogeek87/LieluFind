@@ -60,7 +60,7 @@ class _AboutViewState extends State<AboutView> {
 
                   // ── App name ──
                   Text(
-                    'Dawarich',
+                    'LieluFind',
                     style: theme.textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),

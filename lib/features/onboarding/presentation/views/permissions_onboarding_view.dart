@@ -135,7 +135,7 @@ final class _PermissionsContent extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Dawarich needs a few permissions to track your location reliably in the background.',
+                  'LieluFind needs a few permissions to track your location reliably in the background.',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.textTheme.bodySmall?.color,

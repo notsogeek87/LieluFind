@@ -181,12 +181,12 @@ class BackgroundTrackingEntry {
     if (backgroundService is AndroidServiceInstance) {
       if (lastPointResult case Some(value: final lp)) {
         await backgroundService.setForegroundNotificationInfo(
-          title: 'Dawarich Tracking',
+          title: 'LieluFind Tracking',
           content: 'Last updated at: ${lp.timestamp.toLocal()}, $batchPointCount points in batch.',
         );
       } else {
         await backgroundService.setForegroundNotificationInfo(
-          title: 'Dawarich Tracking',
+          title: 'LieluFind Tracking',
           content: 'Tracking in the background, no points recorded yet.',
         );
       }

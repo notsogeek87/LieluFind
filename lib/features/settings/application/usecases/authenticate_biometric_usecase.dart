@@ -8,7 +8,7 @@ final class AuthenticateBiometricUseCase {
       : _auth = auth ?? LocalAuthentication();
 
   Future<bool> call({
-    String reason = 'Authenticate to open Dawarich',
+    String reason = 'Authenticate to open LieluFind',
   }) async {
     try {
       return await _auth.authenticate(

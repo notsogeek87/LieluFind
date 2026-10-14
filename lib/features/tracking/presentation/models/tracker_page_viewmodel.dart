@@ -441,7 +441,7 @@ final class TrackerPageViewModel extends ChangeNotifier with SafeChangeNotifier 
       final bool shouldShowConsentDialog = await _shouldShowConsentDialog();
       if (shouldShowConsentDialog) {
         final bool confirmed = await requestConsentFromUser(
-            'To enable automatic background tracking, Dawarich needs your permission.\n\n'
+            'To enable automatic background tracking, LieluFind needs your permission.\n\n'
                 'It will request background location access, notification permission, and system exclusions.'
         );
 

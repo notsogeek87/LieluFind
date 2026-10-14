@@ -2,7 +2,7 @@
   <img src="https://github.com/user-attachments/assets/aadd4c49-f2ca-4bb6-8903-95d00457bf6f" alt="Dawarich app icon" width="160" />
 </p>
 
-<h1 align="center">Dawarich Mobile Client for Android</h1>
+<h1 align="center">LieluFind Mobile Client for Android</h1>
 
 <p align="center">
   <h3> A message from the owner/ maintainer: This project is not forgotten nor is it not maintained anymore, I just find it hard to find time to dedicate to this project, and I sadly expect this to remain like this for a while. I recommend you to mainly use Dawarich's official mobile app because it is regularly updated and improved. </h3>
