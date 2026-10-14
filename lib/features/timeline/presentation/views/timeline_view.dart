@@ -8,6 +8,7 @@ import 'package:dawarich/core/shell/drawer/drawer.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_animations/flutter_map_animations.dart';
 import 'package:flutter_map_location_marker/flutter_map_location_marker.dart';
+import 'package:dawarich/features/family/presentation/family_layer.dart';
 import 'package:dawarich/features/timeline/presentation/models/timeline_page_viewmodel.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -325,6 +326,7 @@ class _TimelinePageState extends ConsumerState<TimelineView> with TickerProvider
                   );
                 }).toList(),
               ),
+            const FamilyLayer(),
             const CurrentLocationLayer(),
           ],
         ),
