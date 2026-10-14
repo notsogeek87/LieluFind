@@ -207,9 +207,9 @@ class _TimelinePageState extends ConsumerState<TimelineView> with TickerProvider
 
   Widget _buildBottomSheet(TimelineViewModel mapModel) {
     return DraggableScrollableSheet(
-      initialChildSize: 0.3,
-      minChildSize: 0.15,
-      maxChildSize: 0.75,
+      initialChildSize: 0.16,
+      minChildSize: 0.16,
+      maxChildSize: 0.4,
       builder: (BuildContext context, ScrollController scrollController) {
         return _bottomsheetContent(context, mapModel, scrollController);
       },
