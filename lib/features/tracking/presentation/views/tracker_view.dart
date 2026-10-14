@@ -324,7 +324,7 @@ class _SettingsCard extends StatefulWidget {
 class _SettingsCardState extends State<_SettingsCard> {
   late PageController _pageController;
   int _currentPage = 0;
-  static const int _pageCount = 6;
+  static const int _pageCount = 3;
 
   @override
   void initState() {
@@ -384,10 +384,6 @@ class _SettingsCardState extends State<_SettingsCard> {
               onPageChanged: (index) => setState(() => _currentPage = index),
               children: const [
                 _TrackingHeroPage(),
-                _FrequencyPage(),
-                _MinimumPointDistancePage(),
-                _BatchingPage(),
-                _BatchExpirationPage(),
                 _AdvancedPage(),
                 _TrackRecordingPage(),
               ],
@@ -551,435 +547,7 @@ class _TrackingHeroPage extends StatelessWidget {
   }
 }
 
-/// Page 2: Frequency settings
-class _FrequencyPage extends StatefulWidget {
-  const _FrequencyPage();
-
-  @override
-  State<_FrequencyPage> createState() => _FrequencyPageState();
-}
-
-class _FrequencyPageState extends State<_FrequencyPage> {
-  late TextEditingController _frequencyController;
-  bool _initialized = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _frequencyController = TextEditingController();
-  }
-
-  @override
-  void dispose() {
-    _frequencyController.dispose();
-    super.dispose();
-  }
-
-  void _applyFrequency(TrackerPageViewModel vm) {
-    final parsed = int.tryParse(_frequencyController.text);
-    if (parsed != null && parsed >= 0) {
-      vm.setTrackingFrequency(parsed);
-      _frequencyController.text = parsed.toString();
-    }
-    FocusScope.of(context).unfocus();
-  }
-
-  String _formatFrequency(int seconds) {
-    if (seconds == 0) return 'Auto';
-    return '${seconds}s';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final vm = context.watch<TrackerPageViewModel>();
-    final theme = Theme.of(context);
-
-    if (!_initialized) {
-      _frequencyController.text = vm.trackingFrequency.toString();
-      _initialized = true;
-    }
-
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.timer,
-            size: 48,
-            color: theme.colorScheme.primary,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Frequency',
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Current: ${_formatFrequency(vm.trackingFrequency)}',
-            style: theme.textTheme.bodyLarge?.copyWith(
-              color: theme.colorScheme.primary,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'How often to record your location',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 24),
-          SizedBox(
-            width: 200,
-            child: TextField(
-              controller: _frequencyController,
-              keyboardType: TextInputType.number,
-              textAlign: TextAlign.center,
-              textInputAction: TextInputAction.done,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: InputDecoration(
-                labelText: 'Seconds (0 = auto)',
-                contentPadding: const EdgeInsets.symmetric(
-                    vertical: 12, horizontal: 16),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              onSubmitted: (_) => _applyFrequency(vm),
-              onEditingComplete: () => _applyFrequency(vm),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Page 3: Minimum Point Distance
-class _MinimumPointDistancePage extends StatefulWidget {
-  const _MinimumPointDistancePage();
-
-  @override
-  State<_MinimumPointDistancePage> createState() => _MinimumPointDistancePageState();
-}
-
-class _MinimumPointDistancePageState extends State<_MinimumPointDistancePage> {
-  late TextEditingController _minPointDistController;
-  bool _initialized = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _minPointDistController = TextEditingController();
-  }
-
-  @override
-  void dispose() {
-    _minPointDistController.dispose();
-    super.dispose();
-  }
-
-  void _applyMinimumPointDistance(TrackerPageViewModel vm) {
-    final parsed = int.tryParse(_minPointDistController.text);
-    if (parsed != null && parsed >= 0) {
-      vm.setMinimumPointDistance(parsed);
-      _minPointDistController.text = parsed.toString();
-    }
-    FocusScope.of(context).unfocus();
-  }
-
-  String _formatMinimumPointDistance(int distance) {
-    return '${distance}m';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final vm = context.watch<TrackerPageViewModel>();
-    final theme = Theme.of(context);
-
-    if (!_initialized) {
-      _minPointDistController.text = vm.minimumPointDistance.toString();
-      _initialized = true;
-    }
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return SingleChildScrollView(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              minHeight: constraints.maxHeight,
-            ),
-            child: IntrinsicHeight(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.social_distance,
-                      size: 48,
-                      color: theme.colorScheme.primary,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Minimum Point Distance',
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Current: ${_formatMinimumPointDistance(vm.minimumPointDistance)}',
-                      style: theme.textTheme.bodyLarge?.copyWith(
-                        color: theme.colorScheme.primary,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Minimum distance between recorded points, also affects frequency when set to auto',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 24),
-                    SizedBox(
-                      width: 200,
-                      child: TextField(
-                        controller: _minPointDistController,
-                        keyboardType: TextInputType.number,
-                        textAlign: TextAlign.center,
-                        textInputAction: TextInputAction.done,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                        decoration: InputDecoration(
-                          labelText: 'Meters',
-                          contentPadding: const EdgeInsets.symmetric(
-                              vertical: 12, horizontal: 16),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        onSubmitted: (_) => _applyMinimumPointDistance(vm),
-                        onEditingComplete: () => _applyMinimumPointDistance(vm),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-/// Page 4: Batching settings
-class _BatchingPage extends StatefulWidget {
-  const _BatchingPage();
-
-  @override
-  State<_BatchingPage> createState() => _BatchingPageState();
-}
-
-class _BatchingPageState extends State<_BatchingPage> {
-  late TextEditingController _batchController;
-  bool _initialized = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _batchController = TextEditingController();
-  }
-
-  @override
-  void dispose() {
-    _batchController.dispose();
-    super.dispose();
-  }
-
-  void _applyBatch(TrackerPageViewModel vm) {
-    final parsed = int.tryParse(_batchController.text);
-    if (parsed != null) {
-      vm.setMaxPointsPerBatch(parsed.clamp(vm.minBatch, vm.maxBatch));
-      _batchController.text = vm.maxPointsPerBatch.toString();
-    }
-    FocusScope.of(context).unfocus();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final vm = context.watch<TrackerPageViewModel>();
-    final theme = Theme.of(context);
-
-    if (!_initialized) {
-      _batchController.text = vm.maxPointsPerBatch.toString();
-      _initialized = true;
-    }
-
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.layers,
-            size: 48,
-            color: theme.colorScheme.primary,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Batching',
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Current: ${vm.maxPointsPerBatch} points',
-            style: theme.textTheme.bodyLarge?.copyWith(
-              color: theme.colorScheme.primary,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Points to collect before uploading',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 24),
-          SizedBox(
-            width: 200,
-            child: TextField(
-              controller: _batchController,
-              keyboardType: TextInputType.number,
-              textAlign: TextAlign.center,
-              textInputAction: TextInputAction.done,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: InputDecoration(
-                labelText: '${vm.minBatch}–${vm.maxBatch}',
-                contentPadding: const EdgeInsets.symmetric(
-                    vertical: 12, horizontal: 16),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              onSubmitted: (_) => _applyBatch(vm),
-              onEditingComplete: () => _applyBatch(vm),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Page 5: Batch expiration (time-based upload trigger)
-class _BatchExpirationPage extends StatelessWidget {
-  const _BatchExpirationPage();
-
-  static const _options = <int?, String>{
-    null: 'Off',
-    15: '15m',
-    30: '30m',
-    60: '1h',
-    120: '2h',
-    360: '6h',
-    720: '12h',
-    1440: '24h',
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final vm = context.watch<TrackerPageViewModel>();
-    final theme = Theme.of(context);
-    final current = vm.batchExpirationMinutes;
-    final isEnabled = current != null && current > 0;
-
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 300),
-            child: Icon(
-              isEnabled ? Icons.hourglass_bottom_rounded : Icons.hourglass_disabled_rounded,
-              key: ValueKey(isEnabled),
-              size: 48,
-              color: isEnabled
-                  ? theme.colorScheme.primary
-                  : theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Batch Expiration',
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            isEnabled
-                ? 'Upload after ${_options[current] ?? '${current}m'} of inactivity'
-                : 'Only upload when batch is full',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 20),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            alignment: WrapAlignment.center,
-            children: _options.entries.map((e) {
-              final isSelected = e.key == current;
-              final isOff = e.key == null;
-              return ChoiceChip(
-                label: Text(
-                  e.value,
-                  style: TextStyle(
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                    color: isSelected
-                        ? theme.colorScheme.onPrimary
-                        : isOff
-                            ? theme.colorScheme.onSurfaceVariant
-                            : theme.colorScheme.onSurface,
-                  ),
-                ),
-                selected: isSelected,
-                onSelected: (_) => vm.setBatchExpirationMinutes(e.key),
-                selectedColor: isOff
-                    ? theme.colorScheme.surfaceContainerHighest
-                    : theme.colorScheme.primary,
-                backgroundColor: theme.colorScheme.surfaceContainerLow,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(
-                    color: isSelected
-                        ? Colors.transparent
-                        : theme.colorScheme.outlineVariant,
-                  ),
-                ),
-                showCheckmark: false,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Page 6: Advanced settings
+/// Page 2: Advanced settings
 class _AdvancedPage extends StatefulWidget {
   const _AdvancedPage();
 
@@ -988,20 +556,17 @@ class _AdvancedPage extends StatefulWidget {
 }
 
 class _AdvancedPageState extends State<_AdvancedPage> {
-  late TextEditingController _distanceController;
   late TextEditingController _deviceIdController;
   bool _initialized = false;
 
   @override
   void initState() {
     super.initState();
-    _distanceController = TextEditingController();
     _deviceIdController = TextEditingController();
   }
 
   @override
   void dispose() {
-    _distanceController.dispose();
     _deviceIdController.dispose();
     super.dispose();
   }
@@ -1020,7 +585,6 @@ class _AdvancedPageState extends State<_AdvancedPage> {
     final theme = Theme.of(context);
 
     if (!_initialized) {
-      _distanceController.text = vm.minimumPointDistance.toString();
       _deviceIdController.text = vm.deviceId;
       _initialized = true;
     }
@@ -1110,7 +674,7 @@ class _AdvancedPageState extends State<_AdvancedPage> {
   }
 }
 
-/// Page 5: Track recording (experimental feature)
+/// Page 3: Track recording (experimental feature)
 class _TrackRecordingPage extends StatelessWidget {
   const _TrackRecordingPage();
 

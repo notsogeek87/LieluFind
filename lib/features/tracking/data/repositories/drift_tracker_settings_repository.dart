@@ -30,7 +30,7 @@ final class DriftTrackerSettingsRepository implements ITrackerSettingsRepository
       trackingFrequency: 10,
       locationPrecision: LocationPrecision.high,
       minimumPointDistance: 0,
-      pointsPerBatch: 50,
+      pointsPerBatch: 1,
       deviceId: deviceId,
     );
 
@@ -70,7 +70,7 @@ final class DriftTrackerSettingsRepository implements ITrackerSettingsRepository
       trackingFrequency: 10,
       locationPrecision: LocationPrecision.high,
       minimumPointDistance: 0,
-      pointsPerBatch: 50,
+      pointsPerBatch: 1,
       deviceId: defaultDeviceId,
     );
 
@@ -103,16 +103,19 @@ final class DriftTrackerSettingsRepository implements ITrackerSettingsRepository
         .getSingleOrNull();
   }
 
+  /// Tracking cadence is fixed so the family map is always fresh: a point
+  /// every 10 s, no distance filter, each point uploaded right away. Values
+  /// saved by older versions are ignored.
   TrackerSettings _fromRow(TrackerSettingsTableData r, {required TrackerSettings defaults}) => TrackerSettings(
     userId: r.userId,
     automaticTracking: r.automaticTracking ?? defaults.automaticTracking,
-    trackingFrequency: r.trackingFrequency ?? defaults.trackingFrequency,
+    trackingFrequency: defaults.trackingFrequency,
     locationPrecision: r.locationAccuracy != null
         ? LocationPrecision.fromCode(r.locationAccuracy!)
         : defaults.locationPrecision,
-    minimumPointDistance: r.minimumPointDistance ?? defaults.minimumPointDistance,
-    pointsPerBatch: r.pointsPerBatch ?? defaults.pointsPerBatch,
-    batchExpirationMinutes: r.batchExpirationMinutes,
+    minimumPointDistance: defaults.minimumPointDistance,
+    pointsPerBatch: defaults.pointsPerBatch,
+    batchExpirationMinutes: null,
     deviceId: r.deviceId ?? defaults.deviceId,
   );
 
