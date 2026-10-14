@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:dawarich/core/domain/models/point/local/local_point.dart';
 import 'package:dawarich/core/domain/models/point/point_pair.dart';
 import 'package:dawarich/features/tracking/application/usecases/settings/get_tracker_settings_usecase.dart';
@@ -129,30 +127,8 @@ final class PointValidator {
     return answer;
   }
 
-  double _getAccuracyThreshold(LocationPrecision precision) {
-    if (Platform.isIOS) {
-      switch (precision) {
-        case LocationPrecision.lowPower:
-          return 1000; // iOS Low accuracy
-        case LocationPrecision.balanced:
-          return 100; // iOS Medium accuracy
-        case LocationPrecision.high:
-          return 10; // iOS High accuracy
-        case LocationPrecision.best:
-          return 5; // iOS Best accuracy
-      }
-    } else {
-      switch (precision) {
-        case LocationPrecision.lowPower:
-          return 500; // Android Low power accuracy
-        case LocationPrecision.balanced:
-          return 100; // Android Balanced power accuracy
-        case LocationPrecision.high:
-          return 100; // Android High accuracy
-        case LocationPrecision.best:
-          return 50; // Android Best accuracy
-      }
-    }
-  }
+  /// A rough position (indoors, in a car, network-based) is still far better
+  /// for the family map than a stale one, so only absurd fixes are dropped.
+  double _getAccuracyThreshold(LocationPrecision precision) => 1000;
 
 }
