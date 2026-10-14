@@ -242,6 +242,7 @@ void _showMemberSheet(BuildContext context, FamilyMemberLocation member,
     MapController? mapController) {
   showModalBottomSheet<void>(
     context: context,
+    isScrollControlled: true,
     showDragHandle: true,
     builder: (_) => _MemberSheet(member: member, mapController: mapController),
   );
@@ -260,7 +261,7 @@ final class _MemberSheet extends ConsumerWidget {
     final theme = Theme.of(context);
 
     return SafeArea(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -269,7 +270,7 @@ final class _MemberSheet extends ConsumerWidget {
                 member: member,
                 photo: photo,
                 color: _palette[member.userId.abs() % _palette.length],
-                size: 140),
+                size: 96),
             const SizedBox(height: 12),
             Text(member.shortName, style: theme.textTheme.headlineSmall),
             const SizedBox(height: 4),
