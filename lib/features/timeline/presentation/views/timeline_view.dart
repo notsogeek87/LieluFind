@@ -84,42 +84,37 @@ class _TimelinePageState extends ConsumerState<TimelineView> with TickerProvider
     );
   }
 
-  Widget _bottomsheetContent(BuildContext context, TimelineViewModel mapModel,
-      ScrollController scrollController) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: Theme.of(context).pageBackground,
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(40.0),
-          topRight: Radius.circular(40.0),
-        ),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black26,
-            blurRadius: 6.0,
-            offset: Offset(0, -2),
+  // Compact bar under the map: just the day selector (and a loading hint).
+  // A fixed-height bar replaces the draggable sheet, which left a large empty
+  // dark block over the map.
+  Widget _buildBottomSheet(TimelineViewModel mapModel) {
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: Container(
+        width: double.infinity,
+        decoration: BoxDecoration(
+          gradient: Theme.of(context).pageBackground,
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(24.0),
+            topRight: Radius.circular(24.0),
           ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Container(
-            margin: const EdgeInsets.only(top: 8.0, bottom: 16.0),
-            height: 5.0,
-            width: 40.0,
-            decoration: BoxDecoration(
-              color: Colors.grey[400],
-              borderRadius: BorderRadius.circular(10.0),
+          boxShadow: const [
+            BoxShadow(
+              color: Colors.black26,
+              blurRadius: 6.0,
+              offset: Offset(0, -2),
             ),
-          ),
-          Expanded(
-            child: ListView(
-              controller: scrollController,
-              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+          ],
+        ),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Row(
                   children: [
-                    // Previous day button
                     IconButton(
                       icon: const Icon(Icons.arrow_back_ios_new),
                       onPressed: mapModel.isLoading
@@ -175,44 +170,17 @@ class _TimelinePageState extends ConsumerState<TimelineView> with TickerProvider
                       const SizedBox(width: 48),
                   ],
                 ),
-                const SizedBox(height: 16),
-                Container(
-                  height: 1.5,
-                  margin: const EdgeInsets.symmetric(horizontal: 16.0),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        Colors.grey.withValues(alpha: 0.2),
-                        Colors.grey.withValues(alpha: 0.6),
-                        Colors.grey.withValues(alpha: 0.2),
-                      ],
-                      begin: Alignment.centerLeft,
-                      end: Alignment.centerRight,
-                    ),
+                if (mapModel.isLoading)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 8),
+                    child: TextLoadingIndicator(
+                        message: "Loading your timeline..."),
                   ),
-                ),
-                const SizedBox(height: 16),
-                // Loading indicator or other bottom sheet content
-                mapModel.isLoading
-                    ? const TextLoadingIndicator(
-                        message: "Loading your timeline...")
-                    : const SizedBox(),
               ],
             ),
           ),
-        ],
+        ),
       ),
-    );
-  }
-
-  Widget _buildBottomSheet(TimelineViewModel mapModel) {
-    return DraggableScrollableSheet(
-      initialChildSize: 0.16,
-      minChildSize: 0.16,
-      maxChildSize: 0.4,
-      builder: (BuildContext context, ScrollController scrollController) {
-        return _bottomsheetContent(context, mapModel, scrollController);
-      },
     );
   }
 
