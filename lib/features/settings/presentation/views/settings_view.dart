@@ -2,6 +2,8 @@ import 'package:auto_route/annotations.dart';
 import 'package:dawarich/core/di/providers/session_providers.dart';
 import 'package:dawarich/core/di/providers/settings_providers.dart';
 import 'package:dawarich/core/shell/drawer/drawer.dart';
+import 'package:dawarich/features/app_update/app_update.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:dawarich/features/settings/application/usecases/check_biometric_availability_usecase.dart';
 import 'package:dawarich/shared/widgets/app_scaffold.dart';
 import 'package:flutter/material.dart';
@@ -194,7 +196,77 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
             ],
           ],
         ),
+
+        const SizedBox(height: 24),
+
+        // ── Updates ──
+        const _SectionHeader(title: 'About', icon: Icons.info_outline),
+        const SizedBox(height: 8),
+        _SettingsCard(
+          children: [
+            ListTile(
+              leading: _checkingUpdate
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.system_update_outlined),
+              title: const Text('Check for updates'),
+              subtitle: Text(_updateStatus ?? 'Tap to check for a new version'),
+              onTap: _checkingUpdate ? null : _checkForUpdates,
+            ),
+          ],
+        ),
       ],
+    );
+  }
+
+  bool _checkingUpdate = false;
+  String? _updateStatus;
+
+  Future<void> _checkForUpdates() async {
+    setState(() => _checkingUpdate = true);
+    final r = await runUpdateCheck();
+    if (!mounted) return;
+
+    final installed = 'Installed: ${r.installedVersion}';
+    setState(() {
+      _checkingUpdate = false;
+      _updateStatus = r.error != null
+          ? 'Check failed. $installed'
+          : r.update != null
+              ? 'Update available: ${r.update!.versionName}'
+              : 'Up to date. $installed';
+    });
+
+    final update = r.update;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(update != null
+            ? 'Update available'
+            : r.error != null
+                ? 'Update check failed'
+                : 'You are up to date'),
+        content: Text([
+          installed,
+          if (r.latestTag != null) 'Latest release: ${r.latestTag}',
+          if (r.error != null) r.error!,
+        ].join('\n')),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+          if (update != null)
+            FilledButton(
+              onPressed: () {
+                launchUrl(Uri.parse(update.apkUrl),
+                    mode: LaunchMode.externalApplication);
+                Navigator.pop(ctx);
+              },
+              child: const Text('Download'),
+            ),
+        ],
+      ),
     );
   }
 
