@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:dawarich/core/di/providers/core_providers.dart';
 import 'package:dawarich/features/family/domain/models/family_member_location.dart';
 import 'package:dawarich/features/family/presentation/family_photos.dart';
@@ -8,7 +9,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:option_result/option_result.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 const _refreshInterval = Duration(seconds: 30);
 
@@ -41,6 +44,40 @@ final familyLocationsProvider =
     yield await fetch();
   }
 });
+
+/// Reverse-geocodes a member's position (OpenStreetMap Nominatim).
+final memberAddressProvider =
+    FutureProvider.autoDispose.family<String?, LatLng>((ref, pos) async {
+  try {
+    final res = await Dio().get<Map<String, dynamic>>(
+      'https://nominatim.openstreetmap.org/reverse',
+      queryParameters: {
+        'format': 'jsonv2',
+        'lat': pos.latitude,
+        'lon': pos.longitude,
+        'zoom': 18,
+      },
+      options: Options(
+        headers: {'User-Agent': 'LieluFind'},
+        receiveTimeout: const Duration(seconds: 10),
+      ),
+    );
+    return res.data?['display_name'] as String?;
+  } catch (_) {
+    return null;
+  }
+});
+
+Future<void> _openNavigation(LatLng p, String name) async {
+  final geo = Uri.parse(
+      'geo:${p.latitude},${p.longitude}?q=${p.latitude},${p.longitude}(${Uri.encodeComponent(name)})');
+  if (await launchUrl(geo, mode: LaunchMode.externalApplication)) return;
+  await launchUrl(
+    Uri.parse(
+        'https://www.google.com/maps/dir/?api=1&destination=${p.latitude},${p.longitude}'),
+    mode: LaunchMode.externalApplication,
+  );
+}
 
 /// flutter_map layer showing the last known position of each family member.
 const _palette = <Color>[
@@ -210,7 +247,30 @@ final class _MemberSheet extends ConsumerWidget {
               '${member.battery != null ? ' · batterie ${member.battery} %' : ''}',
               style: theme.textTheme.bodySmall,
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 12),
+            ref.watch(memberAddressProvider(member.position)).when(
+                  data: (a) => Text(
+                    a ?? 'Adresse indisponible',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                  loading: () => const SizedBox(
+                      height: 16,
+                      width: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2)),
+                  error: (_, __) => const SizedBox.shrink(),
+                ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                icon: const Icon(Icons.navigation_outlined),
+                label: const Text('Ouvrir dans une app de navigation'),
+                onPressed: () =>
+                    _openNavigation(member.position, member.shortName),
+              ),
+            ),
+            const SizedBox(height: 8),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(

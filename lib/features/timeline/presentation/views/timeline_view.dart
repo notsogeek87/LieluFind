@@ -300,8 +300,8 @@ class _TimelinePageState extends ConsumerState<TimelineView> with TickerProvider
                   );
                 }).toList(),
               ),
-            const FamilyLayer(),
             const CurrentLocationLayer(),
+            const FamilyLayer(),
           ],
         ),
         _buildBottomSheet(mapModel),
