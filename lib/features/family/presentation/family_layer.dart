@@ -6,6 +6,8 @@ import 'package:dawarich/core/di/providers/core_providers.dart';
 import 'package:dawarich/features/family/domain/models/family_member_location.dart';
 import 'package:dawarich/features/family/presentation/family_photos.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
@@ -79,6 +81,27 @@ Future<void> _openNavigation(LatLng p, String name) async {
   );
 }
 
+/// Distance from the phone's last known fix to [p], or null without a fix.
+final memberDistanceProvider =
+    FutureProvider.autoDispose.family<double?, LatLng>((ref, p) async {
+  try {
+    final me = await Geolocator.getLastKnownPosition();
+    if (me == null) return null;
+    return Geolocator.distanceBetween(
+        me.latitude, me.longitude, p.latitude, p.longitude);
+  } catch (_) {
+    return null;
+  }
+});
+
+String _distance(double m) =>
+    m < 1000 ? '${m.round()} m' : '${(m / 1000).toStringAsFixed(1)} km';
+
+bool _isStale(FamilyMemberLocation m) =>
+    DateTime.now().difference(m.updatedAt).inMinutes >= 60;
+
+bool _isLowBattery(FamilyMemberLocation m) => (m.battery ?? 100) < 15;
+
 /// flutter_map layer showing the last known position of each family member.
 const _palette = <Color>[
   Color(0xFFE65100), // orange
@@ -96,6 +119,7 @@ final class FamilyLayer extends ConsumerWidget {
     final members = ref.watch(familyLocationsProvider).value ?? const [];
     if (members.isEmpty) return const SizedBox.shrink();
     final photos = ref.watch(familyPhotosProvider);
+    final mapController = MapController.maybeOf(context);
 
     // Colour comes from the user id so a person keeps the same colour
     // whoever else is online.
@@ -108,7 +132,7 @@ final class FamilyLayer extends ConsumerWidget {
             height: _avatarSize + 34,
             alignment: Alignment.topCenter,
             child: GestureDetector(
-              onTap: () => _showMemberSheet(context, m),
+              onTap: () => _showMemberSheet(context, m, mapController),
               child: _MemberMarker(
                 member: m,
                 photo: photos[m.userId],
@@ -136,7 +160,11 @@ final class _MemberMarker extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _Avatar(member: member, photo: photo, color: color, size: _avatarSize),
+        Opacity(
+          opacity: _isStale(member) ? 0.5 : 1,
+          child: _Avatar(
+              member: member, photo: photo, color: color, size: _avatarSize),
+        ),
         const SizedBox(height: 3),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -145,6 +173,7 @@ final class _MemberMarker extends StatelessWidget {
             borderRadius: BorderRadius.circular(10),
           ),
           child: Text(
+            '${_isLowBattery(member) ? '🪫 ' : ''}'
             '${member.shortName} · ${_ago(member.updatedAt)}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -209,18 +238,20 @@ String _ago(DateTime t) {
   return 'il y a ${d.inDays} j';
 }
 
-void _showMemberSheet(BuildContext context, FamilyMemberLocation member) {
+void _showMemberSheet(BuildContext context, FamilyMemberLocation member,
+    MapController? mapController) {
   showModalBottomSheet<void>(
     context: context,
     showDragHandle: true,
-    builder: (_) => _MemberSheet(member: member),
+    builder: (_) => _MemberSheet(member: member, mapController: mapController),
   );
 }
 
 final class _MemberSheet extends ConsumerWidget {
   final FamilyMemberLocation member;
+  final MapController? mapController;
 
-  const _MemberSheet({required this.member});
+  const _MemberSheet({required this.member, this.mapController});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -247,6 +278,28 @@ final class _MemberSheet extends ConsumerWidget {
               '${member.battery != null ? ' · batterie ${member.battery} %' : ''}',
               style: theme.textTheme.bodySmall,
             ),
+            if (_isStale(member) || _isLowBattery(member))
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  [
+                    if (_isStale(member)) 'Position ancienne',
+                    if (_isLowBattery(member)) 'Batterie faible',
+                  ].join(' · '),
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: theme.colorScheme.error),
+                ),
+              ),
+            ref.watch(memberDistanceProvider(member.position)).maybeWhen(
+                  data: (d) => d == null
+                      ? const SizedBox.shrink()
+                      : Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text('À ${_distance(d)} de toi',
+                              style: theme.textTheme.bodyMedium),
+                        ),
+                  orElse: () => const SizedBox.shrink(),
+                ),
             const SizedBox(height: 12),
             ref.watch(memberAddressProvider(member.position)).when(
                   data: (a) => Text(
@@ -269,6 +322,39 @@ final class _MemberSheet extends ConsumerWidget {
                 onPressed: () =>
                     _openNavigation(member.position, member.shortName),
               ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                if (mapController != null)
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.my_location),
+                      label: const Text('Recentrer'),
+                      onPressed: () {
+                        mapController!.move(member.position, 16);
+                        Navigator.of(context).pop();
+                      },
+                    ),
+                  ),
+                if (mapController != null) const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.share_outlined),
+                    label: const Text('Copier le lien'),
+                    onPressed: () async {
+                      final p = member.position;
+                      await Clipboard.setData(ClipboardData(
+                          text:
+                              'https://maps.google.com/?q=${p.latitude},${p.longitude}'));
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Lien copié')));
+                      }
+                    },
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 8),
             SizedBox(
