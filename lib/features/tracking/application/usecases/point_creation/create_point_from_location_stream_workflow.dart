@@ -13,11 +13,18 @@ import 'package:option_result/result.dart';
 
 /// Workflow for creating points using either:
 /// - Auto mode (0): Event-driven tracking when location changes meaningfully
-/// - Timer mode (>0): Fixed interval tracking
+/// - Timer mode (>0): Fixed interval while moving, slow heartbeat when still
 final class CreatePointFromLocationStreamWorkflow {
   final GetTrackerSettingsUseCase _getTrackerSettings;
   final ILocationProvider _locationProvider;
   final CreatePointUseCase _createPointFromLocationFix;
+
+  /// Timer mode: a device that moved less than this since the last recorded
+  /// point is considered still (absorbs GPS jitter).
+  static const double _stillRadiusMeters = 25;
+
+  /// Timer mode: while still, only one "I'm still here" point per this delay.
+  static const Duration _stillHeartbeat = Duration(minutes: 5);
 
   CreatePointFromLocationStreamWorkflow(
     this._getTrackerSettings,
@@ -158,6 +165,8 @@ final class CreatePointFromLocationStreamWorkflow {
     int frequencySeconds,
   ) async* {
     LocationFix? latestFix;
+    LocationFix? lastRecordedFix;
+    DateTime? lastRecordedAt;
     StreamSubscription<LocationFix>? locationSub;
 
     final int minSeconds = 1;
@@ -198,6 +207,8 @@ final class CreatePointFromLocationStreamWorkflow {
         final timestamp = DateTime.now().toUtc();
         final pointResult = await _createPointFromLocationFix(fix, timestamp, userId);
         if (pointResult case Ok(value: final point)) {
+          lastRecordedFix = fix;
+          lastRecordedAt = DateTime.now();
           yield Ok(point);
         }
       }
@@ -233,11 +244,25 @@ final class CreatePointFromLocationStreamWorkflow {
           return;
         }
 
+        // Still and recently recorded: skip, the family map is already right.
+        final lastFix = lastRecordedFix;
+        final lastAt = lastRecordedAt;
+        if (lastFix != null && lastAt != null) {
+          final moved = Geolocator.distanceBetween(lastFix.latitude,
+              lastFix.longitude, fixToUse.latitude, fixToUse.longitude);
+          if (moved < _stillRadiusMeters &&
+              DateTime.now().difference(lastAt) < _stillHeartbeat) {
+            return;
+          }
+        }
+
         try {
           final timestamp = DateTime.now().toUtc();
           final pointResult = await _createPointFromLocationFix(fixToUse, timestamp, userId);
 
           if (pointResult case Ok(value: final point)) {
+            lastRecordedFix = fixToUse;
+            lastRecordedAt = DateTime.now();
             controller.add(Ok(point));
           } else if (pointResult case Err(value: final err)) {
             if (kDebugMode) {
