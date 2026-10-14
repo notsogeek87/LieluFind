@@ -1,0 +1,111 @@
+name: Build APK
+
+# Builds the FOSS (no Google services) release APK on every push to main.
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter (from .flutter-version)
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version-file: .flutter-version
+          channel: stable
+          cache: true
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Write android/local.properties
+        run: |
+          SDK_DIR="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          FLUTTER_SDK="${FLUTTER_HOME:-$(dirname "$(dirname "$(readlink -f "$(which flutter)")")")}"
+          {
+            echo "sdk.dir=${SDK_DIR}"
+            echo "flutter.sdk=${FLUTTER_SDK}"
+          } > android/local.properties
+
+      - name: Install NDK and CMake
+        run: |
+          SDK_DIR="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          "${SDK_DIR}/cmdline-tools/latest/bin/sdkmanager" "ndk;27.0.12077973" "cmake;3.22.1"
+          printf '\nandroid.ndkVersion=27.0.12077973\n' >> android/gradle.properties
+
+      - name: Switch pubspec to FOSS
+        run: |
+          cp pubspec-foss.yaml pubspec.yaml
+          cp pubspec-foss.lock pubspec.lock
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Run build_runner
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
+      # Optional: set these repository secrets to sign every build with the
+      # same key, so each APK installs over the previous one. Without them the
+      # APK is signed with a throwaway debug key and you must uninstall first.
+      - name: Set up signing key (if secrets are present)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning::No signing secrets set: APK is signed with a debug key and will not update over a previous install."
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > android/upload.jks
+          {
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyPassword=$KEY_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "storeFile=../upload.jks"
+          } > android/keystore.properties
+
+      - name: Build FOSS APK (release)
+        run: flutter build apk --release --flavor foss
+
+      - name: Rename APK
+        run: |
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-foss-release.apk "dist/LieluFind-${GITHUB_SHA::7}.apk"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LieluFind-apk
+          path: dist/*.apk
+          retention-days: 30
+
+      - name: Publish GitHub pre-release with the APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Build ${{ github.run_number }} (${{ github.sha }})
+          prerelease: true
+          files: dist/*.apk
