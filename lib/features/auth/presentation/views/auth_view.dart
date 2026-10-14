@@ -108,14 +108,6 @@ class _AuthFormCardState extends State<_AuthFormCard> {
               child: _ConnectHeader(vm: vm),
             ),
             const SizedBox(height: 24),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: _ModeSelector(
-                hostedMode: vm.hostedMode,
-                onChanged: vm.setHostedMode,
-              ),
-            ),
-            const SizedBox(height: 24),
             AnimatedSwitcher(
               duration: const Duration(milliseconds: 250),
               child: vm.hostedMode
@@ -180,45 +172,6 @@ class _AuthFormCardState extends State<_AuthFormCard> {
     if (context.mounted) {
       context.router.root.replaceAll([const PermissionsOnboardingRoute()]);
     }
-  }
-}
-
-// ─── Mode Selector ───────────────────────────────────────────────────────────
-
-final class _ModeSelector extends StatelessWidget {
-  final bool hostedMode;
-  final ValueChanged<bool> onChanged;
-
-  const _ModeSelector({required this.hostedMode, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return SegmentedButton<bool>(
-      segments: const [
-        ButtonSegment<bool>(
-          value: true,
-          label: Text('Hosted'),
-          icon: Icon(Icons.cloud_outlined),
-        ),
-        ButtonSegment<bool>(
-          value: false,
-          label: Text('Self-hosted'),
-          icon: Icon(Icons.dns_outlined),
-        ),
-      ],
-      selected: {hostedMode},
-      onSelectionChanged: (s) => onChanged(s.first),
-      style: ButtonStyle(
-        shape: WidgetStatePropertyAll(
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        ),
-        visualDensity: VisualDensity.comfortable,
-        side: WidgetStatePropertyAll(
-          BorderSide(color: theme.colorScheme.outline.withAlpha(80)),
-        ),
-      ),
-    );
   }
 }
 
@@ -434,7 +387,7 @@ final class _ConnectHeader extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         Text(
-          'Connect to Dawarich',
+          'Connect to LieluFind',
           style: Theme.of(context).textTheme.headlineSmall,
         ),
       ],

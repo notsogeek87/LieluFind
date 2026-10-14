@@ -10,7 +10,7 @@ import 'package:option_result/option_result.dart';
 
 final class AuthPageViewModel extends ChangeNotifier with SafeChangeNotifier {
 
-  static const hostedUrl = 'https://my.dawarich.app';
+  static const hostedUrl = 'https://where.lielu.eu';
 
   final RefreshServerCompatibilityUseCase _refreshServerCompatibility;
   final TestHostConnectionUseCase _testHostConnectionUseCase;
