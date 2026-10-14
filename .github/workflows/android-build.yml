@@ -1,0 +1,166 @@
+name: Android build
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Un seul build à la fois par branche. Sur main on n'annule jamais : chaque push
+# garde sa release versionnée, ils passent l'un après l'autre.
+concurrency:
+  group: android-build-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.ref_name != 'main' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter (version de .flutter-version)
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version-file: .flutter-version
+          channel: stable
+          cache: true
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Écrire android/local.properties
+        run: |
+          SDK_DIR="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          FLUTTER_SDK="${FLUTTER_HOME:-$(dirname "$(dirname "$(readlink -f "$(which flutter)")")")}"
+          {
+            echo "sdk.dir=${SDK_DIR}"
+            echo "flutter.sdk=${FLUTTER_SDK}"
+          } > android/local.properties
+
+      - name: Installer NDK et CMake
+        run: |
+          SDK_DIR="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          "${SDK_DIR}/cmdline-tools/latest/bin/sdkmanager" "ndk;27.0.12077973" "cmake;3.22.1"
+          printf '\nandroid.ndkVersion=27.0.12077973\n' >> android/gradle.properties
+
+      # Variante FOSS : sans services Google.
+      - name: Passer le pubspec en FOSS
+        run: |
+          cp pubspec-foss.yaml pubspec.yaml
+          cp pubspec-foss.lock pubspec.lock
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Générer le code (build_runner)
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Tests de la couche Famille
+        run: flutter test test/features/family
+
+      # Clé de debug committée (android/ci-debug.p12), comme pour Backlog : même signature à
+      # chaque build, donc chaque APK s'installe par-dessus le précédent sans désinstaller.
+      # À remplacer par une vraie clé secrète si l'app est un jour distribuée largement.
+      - name: Configurer la signature
+        run: |
+          cat > android/keystore.properties <<'PROPS'
+          storePassword=android
+          keyPassword=android
+          keyAlias=androiddebugkey
+          storeFile=../ci-debug.p12
+          PROPS
+
+      # versionCode = run_number (strictement croissant), versionName = version du pubspec,
+      # tag de release v<version>.<run_number>.
+      - name: Déterminer la version
+        id: version
+        run: |
+          BASE=$(grep '^version:' pubspec.yaml | head -1 | awk '{print $2}' | cut -d+ -f1)
+          echo "base=$BASE" >> "$GITHUB_OUTPUT"
+          echo "name=$BASE.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Rendre gradlew exécutable
+        run: chmod +x android/gradlew
+
+      - name: Compiler l'APK FOSS (release)
+        run: |
+          flutter build apk --release --flavor foss \
+            --build-name=${{ steps.version.outputs.base }} \
+            --build-number=${{ github.run_number }}
+
+      - name: Renommer l'APK avec sa version
+        id: apk
+        run: |
+          NAME="LieluFind-${{ steps.version.outputs.name }}.apk"
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-foss-release.apk "dist/$NAME"
+          echo "path=dist/$NAME" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: lielufind-apk-${{ github.run_number }}
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
+
+      # Vraie release permanente pour chaque push sur main (ou lancement manuel sur main).
+      - name: Publier la release GitHub (main)
+        if: github.event_name != 'pull_request' && github.ref_name == 'main'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${{ steps.version.outputs.name }}"
+          cat > release-notes.md <<'NOTES'
+          ## Installer LieluFind
+
+          1. Télécharge l'APK `${{ steps.apk.outputs.name }}` ci-dessous (section « Assets »).
+          2. Ouvre-le. Si Android bloque l'installation, autorise la source (navigateur ou gestionnaire de fichiers) à installer des applications inconnues.
+          3. Touche « Installer ».
+
+          Tous les APK ont la même clé de signature : une nouvelle version s'installe par-dessus l'ancienne, tes réglages sont conservés. Si Android refuse (« app non installée »), désinstalle l'ancienne version une fois, puis réinstalle.
+
+          ---
+          Run #${{ github.run_number }} (${{ github.sha }}). Signé avec la clé de debug committée.
+          NOTES
+          gh release create "$TAG" \
+            "${{ steps.apk.outputs.path }}" \
+            --title "LieluFind $TAG" \
+            --notes-file release-notes.md \
+            --target "${{ github.sha }}"
+
+      # Autres branches / PR : un tag de pré-release par branche, remplacé à chaque build.
+      - name: Déterminer le tag de release debug
+        id: reltag
+        if: "!(github.event_name != 'pull_request' && github.ref_name == 'main')"
+        run: |
+          BRANCH="${{ github.head_ref || github.ref_name }}"
+          SAFE_BRANCH=$(echo "$BRANCH" | tr '/' '-')
+          echo "tag=debug-$SAFE_BRANCH" >> "$GITHUB_OUTPUT"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Publier l'APK de test en pré-release
+        if: "!(github.event_name != 'pull_request' && github.ref_name == 'main')"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.reltag.outputs.tag }}"
+          gh release delete "$TAG" --yes --cleanup-tag || true
+          gh release create "$TAG" \
+            "${{ steps.apk.outputs.path }}" \
+            --title "LieluFind — APK de test (${{ steps.reltag.outputs.branch }})" \
+            --notes "Build de test de la branche. Run #${{ github.run_number }} (${{ github.sha }})." \
+            --prerelease \
+            --target "${{ github.sha }}"
