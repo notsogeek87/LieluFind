@@ -1,3 +1,4 @@
+import 'package:dawarich/features/app_update/app_update_banner.dart';
 import 'package:dawarich/features/version_check/presentation/widgets/compatibility_banner.dart';
 import 'package:dawarich/shared/widgets/custom_appbar.dart';
 import 'package:flutter/material.dart';
@@ -40,6 +41,7 @@ final class AppScaffold extends StatelessWidget {
       bottomNavigationBar: bottomNavigationBar,
       body: Column(
         children: [
+          const AppUpdateBanner(),
           const CompatibilityBanner(),
           Expanded(child: body),
         ],
