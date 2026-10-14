@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:dawarich/core/di/providers/core_providers.dart';
 import 'package:dawarich/features/family/domain/models/family_member_location.dart';
+import 'package:dawarich/features/family/presentation/family_photos.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:option_result/option_result.dart';
 
 const _refreshInterval = Duration(seconds: 30);
@@ -55,22 +58,25 @@ final class FamilyLayer extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final members = ref.watch(familyLocationsProvider).value ?? const [];
     if (members.isEmpty) return const SizedBox.shrink();
+    final photos = ref.watch(familyPhotosProvider);
 
-    // Colours follow the member's rank among the visible members, so two
-    // members can never end up with the same (or a similar) colour.
-    final ids = (members.map((m) => m.userId).toList()..sort());
-
+    // Colour comes from the user id so a person keeps the same colour
+    // whoever else is online.
     return MarkerLayer(
       markers: [
         for (final m in members)
           Marker(
             point: m.position,
-            width: 96,
-            height: 64,
+            width: 120,
+            height: _avatarSize + 34,
             alignment: Alignment.topCenter,
-            child: _MemberMarker(
-              member: m,
-              color: _palette[ids.indexOf(m.userId) % _palette.length],
+            child: GestureDetector(
+              onTap: () => _showMemberSheet(context, m),
+              child: _MemberMarker(
+                member: m,
+                photo: photos[m.userId],
+                color: _palette[m.userId.abs() % _palette.length],
+              ),
             ),
           ),
       ],
@@ -78,56 +84,175 @@ final class FamilyLayer extends ConsumerWidget {
   }
 }
 
+/// Large on purpose: the whole point is to see at a glance who is who.
+const double _avatarSize = 76;
+
 final class _MemberMarker extends StatelessWidget {
   final FamilyMemberLocation member;
+  final File? photo;
   final Color color;
 
-  const _MemberMarker({required this.member, required this.color});
+  const _MemberMarker({required this.member, this.photo, required this.color});
 
   @override
   Widget build(BuildContext context) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
+        _Avatar(member: member, photo: photo, color: color, size: _avatarSize),
+        const SizedBox(height: 3),
         Container(
-          width: 36,
-          height: 36,
-          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
           decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: color,
-            border: Border.all(color: Colors.white, width: 3),
-            boxShadow: const [BoxShadow(blurRadius: 4, color: Colors.black38)],
-          ),
-          child: Text(
-            member.badge,
-            style: const TextStyle(
-                color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
-          ),
-        ),
-        const SizedBox(height: 2),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.9),
-            borderRadius: BorderRadius.circular(8),
+            color: Colors.white.withValues(alpha: 0.92),
+            borderRadius: BorderRadius.circular(10),
           ),
           child: Text(
             '${member.shortName} · ${_ago(member.updatedAt)}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 10, color: Colors.black87),
+            style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Colors.black87),
           ),
         ),
       ],
     );
   }
+}
 
-  static String _ago(DateTime t) {
-    final d = DateTime.now().difference(t);
-    if (d.inMinutes < 1) return 'now';
-    if (d.inMinutes < 60) return '${d.inMinutes} min';
-    if (d.inHours < 24) return '${d.inHours} h';
-    return '${d.inDays} d';
+final class _Avatar extends StatelessWidget {
+  final FamilyMemberLocation member;
+  final File? photo;
+  final Color color;
+  final double size;
+
+  const _Avatar({
+    required this.member,
+    required this.photo,
+    required this.color,
+    required this.size,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: color,
+        border: Border.all(color: color, width: 4),
+        boxShadow: const [BoxShadow(blurRadius: 6, color: Colors.black45)],
+        image: photo == null
+            ? null
+            : DecorationImage(image: FileImage(photo!), fit: BoxFit.cover),
+      ),
+      child: photo == null
+          ? Text(
+              member.badge,
+              style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: size * 0.38),
+            )
+          : null,
+    );
+  }
+}
+
+String _ago(DateTime t) {
+  final d = DateTime.now().difference(t);
+  if (d.inMinutes < 1) return 'maintenant';
+  if (d.inMinutes < 60) return 'il y a ${d.inMinutes} min';
+  if (d.inHours < 24) return 'il y a ${d.inHours} h';
+  return 'il y a ${d.inDays} j';
+}
+
+void _showMemberSheet(BuildContext context, FamilyMemberLocation member) {
+  showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (_) => _MemberSheet(member: member),
+  );
+}
+
+final class _MemberSheet extends ConsumerWidget {
+  final FamilyMemberLocation member;
+
+  const _MemberSheet({required this.member});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final photo = ref.watch(familyPhotosProvider)[member.userId];
+    final notifier = ref.read(familyPhotosProvider.notifier);
+    final theme = Theme.of(context);
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _Avatar(
+                member: member,
+                photo: photo,
+                color: _palette[member.userId.abs() % _palette.length],
+                size: 140),
+            const SizedBox(height: 12),
+            Text(member.shortName, style: theme.textTheme.headlineSmall),
+            const SizedBox(height: 4),
+            Text(
+              'Position mise à jour ${_ago(member.updatedAt)}'
+              '${member.battery != null ? ' · batterie ${member.battery} %' : ''}',
+              style: theme.textTheme.bodySmall,
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.photo_library_outlined),
+                label: Text(photo == null
+                    ? 'Choisir une photo'
+                    : 'Changer la photo'),
+                onPressed: () async {
+                  final ok = await notifier.pick(member.userId);
+                  if (ok && context.mounted) Navigator.of(context).pop();
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.photo_camera_outlined),
+                label: const Text('Prendre une photo'),
+                onPressed: () async {
+                  final ok =
+                      await notifier.pick(member.userId, source: ImageSource.camera);
+                  if (ok && context.mounted) Navigator.of(context).pop();
+                },
+              ),
+            ),
+            if (photo != null)
+              TextButton(
+                onPressed: () async {
+                  await notifier.remove(member.userId);
+                  if (context.mounted) Navigator.of(context).pop();
+                },
+                child: const Text('Retirer la photo'),
+              ),
+            const SizedBox(height: 4),
+            Text(
+              'Cette photo reste sur ton téléphone.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
