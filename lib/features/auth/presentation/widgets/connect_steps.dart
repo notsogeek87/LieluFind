@@ -1,0 +1,150 @@
+import 'package:dawarich/core/routing/app_router.dart';
+import 'package:dawarich/features/auth/presentation/viewmodels/auth_page_viewmodel.dart';
+import 'package:dawarich/main.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+final class ServerStepWidget extends StatelessWidget {
+  final GlobalKey<FormState> formKey;
+  const ServerStepWidget({required this.formKey, super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final vm = context.watch<AuthPageViewModel>();
+    return Form(
+      key: formKey,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextFormField(
+              controller: vm.hostController,
+              decoration: InputDecoration(
+                labelText: 'Host URL',
+                prefixIcon: const Icon(Icons.link),
+                suffixIcon: IconButton(
+                  tooltip: 'Scan QR',
+                  icon: const Icon(Icons.qr_code_scanner),
+                  onPressed: vm.isVerifyingHost || vm.isLoggingIn
+                      ? null
+                      : () => _onScanQrTapped(context),
+                ),
+                filled: true,
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                contentPadding:
+                    const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+              ),
+              keyboardType: TextInputType.url,
+              validator: (v) => (v != null && v.isNotEmpty)
+                  ? null
+                  : 'Please enter a host URL.',
+            ),
+            const SizedBox(height: 16),
+            if (vm.errorMessage != null)
+              Text(
+                vm.errorMessage!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _onScanQrTapped(BuildContext context) async {
+    final vm = context.read<AuthPageViewModel>();
+
+    FocusScope.of(context).unfocus();
+
+    final String? qrResult = await appRouter.push<String>(
+        const AuthQrScanRoute()
+    );
+
+    if (qrResult == null) {
+      return;
+    }
+
+    await vm.tryQrLogin(
+      qrResult,
+      onNavigateToTimeline: () => appRouter.replaceAll([
+        const PermissionsOnboardingRoute()
+      ]),
+      onShowError: (msg) => _showInlineError(context, msg),
+    );
+  }
+
+  void _showInlineError(BuildContext context, String message) {
+    final vm = context.read<AuthPageViewModel>();
+    vm.setSnackbarMessage(message);
+  }
+}
+
+class LoginStepWidget extends StatelessWidget {
+  final GlobalKey<FormState> formKey;
+  const LoginStepWidget({required this.formKey, super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final vm = context.watch<AuthPageViewModel>();
+    return Form(
+      key: formKey,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextFormField(
+              controller: vm.apiKeyController,
+              obscureText: !vm.apiKeyVisible,
+              decoration: InputDecoration(
+                labelText: 'API Key',
+                prefixIcon: const Icon(Icons.vpn_key),
+                filled: true,
+                contentPadding:
+                    const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                suffixIcon: IconButton(
+                  icon: Icon(vm.apiKeyVisible
+                      ? Icons.visibility
+                      : Icons.visibility_off),
+                  onPressed: () => vm.setApiKeyVisibility(!vm.apiKeyVisible),
+                ),
+              ),
+              validator: (v) =>
+                  (v != null && v.isNotEmpty) ? null : 'Enter API key',
+            ),
+            if (vm.errorMessage != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  vm.errorMessage!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+            const SizedBox(height: 24),
+            TextButton(
+              onPressed: () => showDialog(
+                context: context,
+                builder: (_) => AlertDialog(
+                  title: const Text('Coming Soon'),
+                  content:
+                      const Text('Email/password login is not supported yet.'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('OK'),
+                    )
+                  ],
+                ),
+              ),
+              child: const Text('Use Email / Password'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

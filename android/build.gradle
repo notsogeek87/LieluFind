@@ -1,0 +1,32 @@
+buildscript {
+    ext.kotlin_version = '2.2.0'
+
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.11.2'
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+def sharedBuildDir = rootProject.layout.buildDirectory
+
+sharedBuildDir.set(file("../build"))
+
+subprojects {
+    layout.buildDirectory.set(sharedBuildDir.dir(name))
+    evaluationDependsOn(":app")
+}
+
+tasks.register("clean", Delete) {
+    delete rootProject.layout.buildDirectory
+}
