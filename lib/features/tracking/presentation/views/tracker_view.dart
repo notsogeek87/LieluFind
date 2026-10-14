@@ -4,7 +4,6 @@ import 'package:dawarich/core/di/providers/viewmodel_providers.dart';
 import 'package:dawarich/core/routing/app_router.dart';
 import 'package:dawarich/core/shell/drawer/drawer.dart';
 import 'package:dawarich/core/theme/app_gradients.dart';
-import 'package:dawarich/features/tracking/domain/enum/location_precision.dart';
 import 'package:dawarich/shared/widgets/app_scaffold.dart';
 import 'package:flutter/material.dart';
 import 'package:dawarich/features/tracking/presentation/models/tracker_page_viewmodel.dart';
@@ -606,30 +605,6 @@ class _AdvancedPageState extends State<_AdvancedPage> {
             ),
           ),
           const SizedBox(height: 16),
-          // Accuracy dropdown
-          Row(
-            children: [
-              const Icon(Icons.precision_manufacturing, size: 18),
-              const SizedBox(width: 8),
-              Text('Accuracy', style: theme.textTheme.bodyMedium),
-            ],
-          ),
-          const SizedBox(height: 4),
-          SizedBox(
-            width: double.infinity,
-            child: DropdownButton<LocationPrecision>(
-              value: vm.locationAccuracy,
-              isExpanded: true,
-              onChanged: (v) => v != null ? vm.setLocationAccuracy(v) : null,
-              items: vm.accuracyOptions.map((opt) {
-                return DropdownMenuItem(
-                  value: opt['value'] as LocationPrecision,
-                  child: Text(opt['label'] as String),
-                );
-              }).toList(),
-            ),
-          ),
-          const SizedBox(height: 12),
           // Device ID
           Row(
             children: [

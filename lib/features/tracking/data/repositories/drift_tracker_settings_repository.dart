@@ -28,7 +28,7 @@ final class DriftTrackerSettingsRepository implements ITrackerSettingsRepository
       userId: userId,
       automaticTracking: false,
       trackingFrequency: 10,
-      locationPrecision: LocationPrecision.high,
+      locationPrecision: LocationPrecision.balanced,
       minimumPointDistance: 0,
       pointsPerBatch: 1,
       deviceId: deviceId,
@@ -68,7 +68,7 @@ final class DriftTrackerSettingsRepository implements ITrackerSettingsRepository
       userId: userId,
       automaticTracking: false,
       trackingFrequency: 10,
-      locationPrecision: LocationPrecision.high,
+      locationPrecision: LocationPrecision.balanced,
       minimumPointDistance: 0,
       pointsPerBatch: 1,
       deviceId: defaultDeviceId,
@@ -110,9 +110,7 @@ final class DriftTrackerSettingsRepository implements ITrackerSettingsRepository
     userId: r.userId,
     automaticTracking: r.automaticTracking ?? defaults.automaticTracking,
     trackingFrequency: defaults.trackingFrequency,
-    locationPrecision: r.locationAccuracy != null
-        ? LocationPrecision.fromCode(r.locationAccuracy!)
-        : defaults.locationPrecision,
+    locationPrecision: defaults.locationPrecision,
     minimumPointDistance: defaults.minimumPointDistance,
     pointsPerBatch: defaults.pointsPerBatch,
     batchExpirationMinutes: null,

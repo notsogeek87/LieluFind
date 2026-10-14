@@ -9,7 +9,7 @@ import 'package:dawarich/features/tracking/domain/models/location_request.dart';
 import 'package:dawarich/features/tracking/domain/models/tracker_settings.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:option_result/result.dart';
+import 'package:option_result/option_result.dart';
 
 /// Workflow for creating points using either:
 /// - Auto mode (0): Event-driven tracking when location changes meaningfully
@@ -158,6 +158,28 @@ final class CreatePointFromLocationStreamWorkflow {
     return timeDiff > 60;
   }
 
+  /// Max wait for a fix. Without a limit, a GPS that cannot see the sky
+  /// (indoors, FOSS build) blocks the whole stream and no point is ever made.
+  static const Duration _fixTimeout = Duration(seconds: 20);
+
+  /// A last-known fix older than this is not worth publishing.
+  static const Duration _maxLastKnownAge = Duration(minutes: 10);
+
+  Future<Result<LocationFix, String>> _fixNow(LocationRequest request) async {
+    final current = await _locationProvider.getCurrent(request).timeout(
+          _fixTimeout,
+          onTimeout: () => Err<LocationFix, String>('Timed out waiting for a location fix'),
+        );
+    if (current case Ok()) return current;
+
+    final last = await _locationProvider.getLastKnown();
+    if (last case Some(value: final fix)) {
+      final age = DateTime.now().toUtc().difference(fix.timestampUtc);
+      if (age < _maxLastKnownAge) return Ok(fix);
+    }
+    return current;
+  }
+
   /// Timer mode: emit points at fixed intervals using cached location.
   Stream<Result<LocalPoint, String>> _getTimerPointStream(
     int userId,
@@ -201,7 +223,7 @@ final class CreatePointFromLocationStreamWorkflow {
 
       final controller = StreamController<Result<LocalPoint, String>>();
 
-      final initialResult = await _locationProvider.getCurrent(request);
+      final initialResult = await _fixNow(request);
       if (initialResult case Ok(value: final fix)) {
         latestFix = fix;
         final timestamp = DateTime.now().toUtc();
@@ -232,7 +254,7 @@ final class CreatePointFromLocationStreamWorkflow {
           if (kDebugMode) {
             debugPrint('[LocationStream] Cache stale, fetching current position');
           }
-          final currentResult = await _locationProvider.getCurrent(request);
+          final currentResult = await _fixNow(request);
           if (currentResult case Ok(value: final fix)) {
             fixToUse = fix;
             latestFix = fix;
