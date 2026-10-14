@@ -30,4 +30,18 @@ void main() {
     );
     expect(FamilyMemberLocation.tryFromJson('nope'), isNull);
   });
+
+  test('derives a short name and a two-letter badge', () {
+    FamilyMemberLocation make(String name) => FamilyMemberLocation.tryFromJson({
+          'user_id': 1,
+          'name': name,
+          'latitude': 1.0,
+          'longitude': 2.0,
+        })!;
+
+    expect(make('deborah.defranc@example.com').shortName, 'Deborah');
+    expect(make('deborah.defranc@example.com').badge, 'De');
+    expect(make('davidg.c.d@proton.me').badge, 'Da');
+    expect(make('David').badge, 'Da');
+  });
 }

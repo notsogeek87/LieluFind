@@ -40,6 +40,14 @@ final familyLocationsProvider =
 });
 
 /// flutter_map layer showing the last known position of each family member.
+const _palette = <Color>[
+  Color(0xFFE65100), // orange
+  Color(0xFF00897B), // teal
+  Color(0xFF6A1B9A), // purple
+  Color(0xFFC62828), // red
+  Color(0xFF2E7D32), // green
+];
+
 final class FamilyLayer extends ConsumerWidget {
   const FamilyLayer({super.key});
 
@@ -47,6 +55,10 @@ final class FamilyLayer extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final members = ref.watch(familyLocationsProvider).value ?? const [];
     if (members.isEmpty) return const SizedBox.shrink();
+
+    // Colours follow the member's rank among the visible members, so two
+    // members can never end up with the same (or a similar) colour.
+    final ids = (members.map((m) => m.userId).toList()..sort());
 
     return MarkerLayer(
       markers: [
@@ -56,7 +68,10 @@ final class FamilyLayer extends ConsumerWidget {
             width: 96,
             height: 64,
             alignment: Alignment.topCenter,
-            child: _MemberMarker(member: m),
+            child: _MemberMarker(
+              member: m,
+              color: _palette[ids.indexOf(m.userId) % _palette.length],
+            ),
           ),
       ],
     );
@@ -65,13 +80,12 @@ final class FamilyLayer extends ConsumerWidget {
 
 final class _MemberMarker extends StatelessWidget {
   final FamilyMemberLocation member;
+  final Color color;
 
-  const _MemberMarker({required this.member});
+  const _MemberMarker({required this.member, required this.color});
 
   @override
   Widget build(BuildContext context) {
-    final color = Colors.primaries[member.userId % Colors.primaries.length];
-
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -86,9 +100,9 @@ final class _MemberMarker extends StatelessWidget {
             boxShadow: const [BoxShadow(blurRadius: 4, color: Colors.black38)],
           ),
           child: Text(
-            member.initial,
+            member.badge,
             style: const TextStyle(
-                color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
           ),
         ),
         const SizedBox(height: 2),
@@ -99,7 +113,7 @@ final class _MemberMarker extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
           ),
           child: Text(
-            '${member.name} · ${_ago(member.updatedAt)}',
+            '${member.shortName} · ${_ago(member.updatedAt)}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 10, color: Colors.black87),

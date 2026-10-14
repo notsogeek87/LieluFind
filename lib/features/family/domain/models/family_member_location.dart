@@ -19,6 +19,23 @@ final class FamilyMemberLocation {
     this.battery,
   });
 
+  /// First name guessed from the display name or the email local part
+  /// ("deborah.defranc@x.fr" -> "Deborah").
+  String get shortName {
+    final base = name.contains('@') ? name.split('@').first : name;
+    final token = base
+        .split(RegExp(r'[._\-\s\d]+'))
+        .firstWhere((t) => t.isNotEmpty, orElse: () => base);
+    if (token.isEmpty) return initial;
+    return token[0].toUpperCase() + token.substring(1).toLowerCase();
+  }
+
+  /// Two letters ("De"), so members sharing a first initial stay distinct.
+  String get badge {
+    final n = shortName;
+    return n.length >= 2 ? n.substring(0, 2) : n;
+  }
+
   static FamilyMemberLocation? tryFromJson(Object? json) {
     if (json is! Map) return null;
 
