@@ -113,19 +113,13 @@ final class TimelineViewModel extends ChangeNotifier with SafeChangeNotifier {
   void setAnimatedMapController(AnimatedMapController controller) {
     if (isDisposed) return;
 
-    final bool wasNull = animatedMapController == null;
-    animatedMapController ??= controller;
+    if (identical(animatedMapController, controller)) return;
 
-    if (!wasNull) {
-      return;
-    }
-
-    final pendingCenter = _pendingCenter;
-
-    if (_mapReady && pendingCenter != null) {
-      _animateTo(pendingCenter);
-      _pendingCenter = null;
-    }
+    // The view (and its map) can be rebuilt while this view model lives on:
+    // always drive the latest controller, and wait for its map to be ready.
+    animatedMapController = controller;
+    _mapReady = false;
+    _lastCameraTarget = null;
   }
 
   bool _sameTarget(LatLng a, LatLng b) =>

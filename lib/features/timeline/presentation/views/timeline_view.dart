@@ -30,6 +30,12 @@ class _TimelinePageState extends ConsumerState<TimelineView> with TickerProvider
   }
 
   @override
+  void dispose() {
+    _animatedMapController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final vmAsync = ref.watch(timelineViewModelProvider);
 
