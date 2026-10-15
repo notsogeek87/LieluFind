@@ -131,16 +131,51 @@ final class _Cluster {
   Offset get centre => sum / members.length.toDouble();
 }
 
-final class FamilyLayer extends ConsumerWidget {
+final class FamilyLayer extends ConsumerStatefulWidget {
   const FamilyLayer({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<FamilyLayer> createState() => _FamilyLayerState();
+}
+
+final class _FamilyLayerState extends ConsumerState<FamilyLayer> {
+  bool _fitted = false;
+
+  /// Zooms the map once, when the map opens, so everybody (and the phone
+  /// itself, when a fix is known) is visible.
+  Future<void> _fitEveryone(
+      MapController? controller, List<FamilyMemberLocation> members) async {
+    if (controller == null) return;
+
+    final points = [for (final m in members) m.position];
+    try {
+      final me = await Geolocator.getLastKnownPosition();
+      if (me != null) points.add(LatLng(me.latitude, me.longitude));
+    } catch (_) {}
+    if (!mounted || points.isEmpty) return;
+
+    // maxZoom keeps a single point (or everyone at the same spot) readable.
+    controller.fitCamera(CameraFit.coordinates(
+      coordinates: points,
+      padding: const EdgeInsets.fromLTRB(60, 140, 60, 260),
+      maxZoom: 17,
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final members = ref.watch(familyLocationsProvider).value ?? const [];
     if (members.isEmpty) return const SizedBox.shrink();
     final photos = ref.watch(familyPhotosProvider);
     final mapController = MapController.maybeOf(context);
     final camera = MapCamera.of(context);
+
+    if (!_fitted) {
+      _fitted = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _fitEveryone(mapController, members);
+      });
+    }
 
     // Group members that overlap on screen. Working in pixels means groups
     // split by themselves as the user zooms in.
