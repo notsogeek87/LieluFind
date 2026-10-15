@@ -47,8 +47,9 @@ final class TrackerNotificationService {
     const android = AndroidNotificationDetails(
       NotificationConstants.channelId,
       NotificationConstants.channelName,
-      importance: Importance.low,
-      priority: Priority.low,
+      importance: Importance.min,
+      priority: Priority.min,
+      showWhen: false,
       ongoing: true,
       onlyAlertOnce: true,
       category: AndroidNotificationCategory.service,

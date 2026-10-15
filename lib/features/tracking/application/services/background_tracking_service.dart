@@ -208,7 +208,7 @@ final class BackgroundTrackingService {
       NotificationConstants.channelId,
       NotificationConstants.channelName,
       description: NotificationConstants.channelDescription,
-      importance: Importance.low,
+      importance: Importance.min,
     );
 
     final FlutterLocalNotificationsPlugin plugin = FlutterLocalNotificationsPlugin();
