@@ -1,10 +1,10 @@
 import 'package:dawarich/features/app_update/app_update.dart';
+import 'package:dawarich/features/app_update/app_update_installer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 /// Shows a card when a newer APK is available. Tapping "Update" downloads
-/// it through the system; Android then installs it over the current app
+/// it in the app; Android then installs it over the current app
 /// (same signing key). Renders nothing when up to date.
 final class AppUpdateBanner extends ConsumerStatefulWidget {
   const AppUpdateBanner({super.key});
@@ -40,10 +40,7 @@ class _AppUpdateBannerState extends ConsumerState<AppUpdateBanner> {
               ),
             ),
             TextButton(
-              onPressed: () => launchUrl(
-                Uri.parse(update.apkUrl),
-                mode: LaunchMode.externalApplication,
-              ),
+              onPressed: () => downloadAndInstallUpdate(context, update),
               child: const Text('Update'),
             ),
             IconButton(
