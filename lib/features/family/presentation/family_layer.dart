@@ -131,6 +131,10 @@ final class _Cluster {
   Offset get centre => sum / members.length.toDouble();
 }
 
+/// True once the map has been framed on the family, so the timeline does not
+/// pull the camera back to the first point of the day.
+final familyFitDone = ValueNotifier<bool>(false);
+
 final class FamilyLayer extends ConsumerStatefulWidget {
   const FamilyLayer({super.key});
 
@@ -140,6 +144,12 @@ final class FamilyLayer extends ConsumerStatefulWidget {
 
 final class _FamilyLayerState extends ConsumerState<FamilyLayer> {
   bool _fitted = false;
+
+  @override
+  void dispose() {
+    familyFitDone.value = false;
+    super.dispose();
+  }
 
   /// Zooms the map once, when the map opens, so everybody (and the phone
   /// itself, when a fix is known) is visible.
@@ -152,6 +162,8 @@ final class _FamilyLayerState extends ConsumerState<FamilyLayer> {
       final me = await Geolocator.getLastKnownPosition();
       if (me != null) points.add(LatLng(me.latitude, me.longitude));
     } catch (_) {}
+    // Let the timeline's own opening animation finish first.
+    await Future<void>.delayed(const Duration(milliseconds: 700));
     if (!mounted || points.isEmpty) return;
 
     // maxZoom keeps a single point (or everyone at the same spot) readable.
@@ -160,6 +172,7 @@ final class _FamilyLayerState extends ConsumerState<FamilyLayer> {
       padding: const EdgeInsets.fromLTRB(60, 140, 60, 260),
       maxZoom: 17,
     ));
+    familyFitDone.value = true;
   }
 
   @override

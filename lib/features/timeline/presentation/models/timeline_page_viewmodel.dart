@@ -7,6 +7,7 @@ import 'package:dawarich/core/presentation/safe_change_notifier.dart';
 import 'package:dawarich/features/batch/application/usecases/watch_current_batch_usecase.dart';
 import 'package:dawarich/features/timeline/application/helpers/timeline_points_processor.dart';
 import 'package:dawarich/features/timeline/application/usecases/get_default_map_center_usecase.dart';
+import 'package:dawarich/features/family/presentation/family_layer.dart' show familyFitDone;
 import 'package:dawarich/features/timeline/application/usecases/load_timeline_usecase.dart';
 import 'package:dawarich/features/timeline/domain/models/day_map_data.dart';
 import 'package:flutter/foundation.dart';
@@ -41,6 +42,7 @@ final class TimelineViewModel extends ChangeNotifier with SafeChangeNotifier {
 
   LatLng? _pendingCenter;
   bool _mapReady = false;
+  bool _firstAutoCenter = true;
   LatLng? _lastCameraTarget;
   final double _epsilon = 1e-7;
   final double _epsilonMeters = 5.0;
@@ -237,7 +239,10 @@ final class TimelineViewModel extends ChangeNotifier with SafeChangeNotifier {
     _rebuildLocalPoints(cutoffMs: day.lastTimestampMs);
 
     if (day.points.isNotEmpty) {
-      _animateTo(day.points.first);
+      // On opening, the map is framed on the family instead (see FamilyLayer).
+      final firstLoad = _firstAutoCenter;
+      _firstAutoCenter = false;
+      if (!(firstLoad && familyFitDone.value)) _animateTo(day.points.first);
     }
   }
 
