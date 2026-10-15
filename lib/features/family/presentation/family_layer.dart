@@ -117,7 +117,12 @@ const double _clusterPx = 70;
 
 /// Distance from the avatar's centre to the marker anchor (label + gap +
 /// half an avatar), used to draw the connector to the avatar's middle.
-const double _anchorToAvatarCentre = 24 + 3 + _avatarSize / 2;
+const double _anchorToAvatarCentre = _labelBlock + _avatarSize / 2;
+
+const double _markerWidth = 130;
+
+/// Gap + two-line label below the avatar.
+const double _labelBlock = 3 + 44;
 
 /// A group of members whose avatars would overlap at the current zoom.
 final class _Cluster {
@@ -212,8 +217,8 @@ final class _FamilyLayerState extends ConsumerState<FamilyLayer> {
 
     Marker markerAt(FamilyMemberLocation m, LatLng at) => Marker(
           point: at,
-          width: 120,
-          height: _avatarSize + 34,
+          width: _markerWidth,
+          height: _avatarSize + _labelBlock,
           alignment: Alignment.topCenter,
           child: GestureDetector(
             onTap: () => _showMemberSheet(context, m, mapController),
@@ -239,7 +244,7 @@ final class _FamilyLayerState extends ConsumerState<FamilyLayer> {
       final n = group.length;
       final centre = c.centre;
       final centreLatLng = camera.screenOffsetToLatLng(centre);
-      final radius = math.max(60.0, 58 / math.sin(math.pi / n));
+      final radius = math.max(66.0, 64 / math.sin(math.pi / n));
 
       dots.add(CircleMarker(
         point: centreLatLng,
@@ -299,20 +304,35 @@ final class _MemberMarker extends StatelessWidget {
         ),
         const SizedBox(height: 3),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          width: _markerWidth - 8,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
           decoration: BoxDecoration(
             color: Colors.white.withValues(alpha: 0.92),
             borderRadius: BorderRadius.circular(10),
           ),
-          child: Text(
-            '${_isLowBattery(member) ? '🪫 ' : ''}'
-            '${member.shortName} · ${_ago(member.updatedAt)}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: Colors.black87),
+          // Name and age on two lines: on one line the age was always cut.
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '${_isLowBattery(member) ? '🪫 ' : ''}${member.shortName}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.black87),
+              ),
+              Text(
+                _ago(member.updatedAt),
+                maxLines: 1,
+                style: TextStyle(
+                    fontSize: 12,
+                    color: _isStale(member)
+                        ? Colors.red.shade700
+                        : Colors.black54),
+              ),
+            ],
           ),
         ),
       ],
