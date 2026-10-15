@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
 import 'package:dawarich/core/di/providers/core_providers.dart';
@@ -111,6 +112,25 @@ const _palette = <Color>[
   Color(0xFF2E7D32), // green
 ];
 
+/// Two avatars closer than this (in screen pixels) are fanned out.
+const double _clusterPx = 70;
+
+/// Distance from the avatar's centre to the marker anchor (label + gap +
+/// half an avatar), used to draw the connector to the avatar's middle.
+const double _anchorToAvatarCentre = 24 + 3 + _avatarSize / 2;
+
+/// A group of members whose avatars would overlap at the current zoom.
+final class _Cluster {
+  final List<FamilyMemberLocation> members;
+  Offset sum;
+
+  _Cluster(FamilyMemberLocation m, Offset o)
+      : members = [m],
+        sum = o;
+
+  Offset get centre => sum / members.length.toDouble();
+}
+
 final class FamilyLayer extends ConsumerWidget {
   const FamilyLayer({super.key});
 
@@ -120,26 +140,90 @@ final class FamilyLayer extends ConsumerWidget {
     if (members.isEmpty) return const SizedBox.shrink();
     final photos = ref.watch(familyPhotosProvider);
     final mapController = MapController.maybeOf(context);
+    final camera = MapCamera.of(context);
 
-    // Colour comes from the user id so a person keeps the same colour
-    // whoever else is online.
-    return MarkerLayer(
-      markers: [
-        for (final m in members)
-          Marker(
-            point: m.position,
-            width: 120,
-            height: _avatarSize + 34,
-            alignment: Alignment.topCenter,
-            child: GestureDetector(
-              onTap: () => _showMemberSheet(context, m, mapController),
-              child: _MemberMarker(
-                member: m,
-                photo: photos[m.userId],
-                color: _palette[m.userId.abs() % _palette.length],
-              ),
+    // Group members that overlap on screen. Working in pixels means groups
+    // split by themselves as the user zooms in.
+    final clusters = <_Cluster>[];
+    for (final m in members) {
+      final o = camera.latLngToScreenOffset(m.position);
+      final hit = clusters
+          .where((c) => (c.centre - o).distance < _clusterPx)
+          .firstOrNull;
+      if (hit == null) {
+        clusters.add(_Cluster(m, o));
+      } else {
+        hit.members.add(m);
+        hit.sum += o;
+      }
+    }
+
+    final markers = <Marker>[];
+    final lines = <Polyline>[];
+    final dots = <CircleMarker>[];
+
+    Marker markerAt(FamilyMemberLocation m, LatLng at) => Marker(
+          point: at,
+          width: 120,
+          height: _avatarSize + 34,
+          alignment: Alignment.topCenter,
+          child: GestureDetector(
+            onTap: () => _showMemberSheet(context, m, mapController),
+            // Colour comes from the user id so a person keeps the same
+            // colour whoever else is online.
+            child: _MemberMarker(
+              member: m,
+              photo: photos[m.userId],
+              color: _palette[m.userId.abs() % _palette.length],
             ),
           ),
+        );
+
+    for (final c in clusters) {
+      if (c.members.length == 1) {
+        markers.add(markerAt(c.members.first, c.members.first.position));
+        continue;
+      }
+
+      // Fan the avatars out on a circle around the real spot, with a thin
+      // line back to it so the shared location stays obvious.
+      final group = [...c.members]..sort((a, b) => a.userId - b.userId);
+      final n = group.length;
+      final centre = c.centre;
+      final centreLatLng = camera.screenOffsetToLatLng(centre);
+      final radius = math.max(60.0, 58 / math.sin(math.pi / n));
+
+      dots.add(CircleMarker(
+        point: centreLatLng,
+        radius: 6,
+        color: Colors.black87,
+        borderColor: Colors.white,
+        borderStrokeWidth: 2,
+      ));
+
+      for (var i = 0; i < n; i++) {
+        final angle = math.pi + 2 * math.pi * i / n; // 2 people: left/right
+        final anchor = centre + Offset.fromDirection(angle, radius);
+        final m = group[i];
+        lines.add(Polyline(
+          points: [
+            centreLatLng,
+            camera.screenOffsetToLatLng(
+                anchor.translate(0, -_anchorToAvatarCentre)),
+          ],
+          strokeWidth: 3,
+          color: _palette[m.userId.abs() % _palette.length],
+        ));
+        markers.add(markerAt(m, camera.screenOffsetToLatLng(anchor)));
+      }
+    }
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (lines.isNotEmpty) PolylineLayer(polylines: lines),
+        if (dots.isNotEmpty) CircleLayer(circles: dots),
+        MarkerLayer(markers: markers),
       ],
     );
   }
