@@ -26,6 +26,9 @@ final class CreatePointFromLocationStreamWorkflow {
   /// Timer mode: while still, only one "I'm still here" point per this delay.
   static const Duration _stillHeartbeat = Duration(minutes: 5);
 
+  /// Timer mode: the location stream only reports after this much movement.
+  static const int _streamDistanceMeters = 10;
+
   CreatePointFromLocationStreamWorkflow(
     this._getTrackerSettings,
     this._locationProvider,
@@ -191,19 +194,22 @@ final class CreatePointFromLocationStreamWorkflow {
     DateTime? lastRecordedAt;
     StreamSubscription<LocationFix>? locationSub;
 
-    final int minSeconds = 1;
-    final int intervalSeconds =
-    (frequencySeconds / 2).ceil().clamp(minSeconds, frequencySeconds);
-
-    final intervalDuration = Duration(seconds: intervalSeconds);
-
+    // Battery: the stream only wakes the GPS/network provider when the phone
+    // moved _streamDistanceMeters, and at most once per tracking interval.
+    // A still phone therefore costs (almost) nothing between heartbeats.
     final request = LocationRequest(
+      precision: precision,
+      distanceFilterMeters: _streamDistanceMeters,
+      timeLimit: null,
+      intervalDuration: Duration(seconds: frequencySeconds),
+    );
+    final fixRequest = LocationRequest(
       precision: precision,
       distanceFilterMeters: 0,
       timeLimit: null,
-      // Poll at half the tracking frequency so we usually have a fresh fix
-      intervalDuration: intervalDuration,
+      intervalDuration: Duration(seconds: frequencySeconds),
     );
+    Timer? timer;
 
     try {
       final locationStream = _locationProvider.getLocationStream(request);
@@ -222,8 +228,14 @@ final class CreatePointFromLocationStreamWorkflow {
       );
 
       final controller = StreamController<Result<LocalPoint, String>>();
+      // Stop the timer and the location stream as soon as the consumer goes
+      // away (stop / settings restart); otherwise they keep running forever.
+      controller.onCancel = () async {
+        timer?.cancel();
+        await locationSub?.cancel();
+      };
 
-      final initialResult = await _fixNow(request);
+      final initialResult = await _fixNow(fixRequest);
       if (initialResult case Ok(value: final fix)) {
         latestFix = fix;
         final timestamp = DateTime.now().toUtc();
@@ -241,20 +253,32 @@ final class CreatePointFromLocationStreamWorkflow {
         debugPrint('[LocationStream] Timer mode: interval = ${frequencySeconds}s');
       }
 
-      Timer.periodic(timerDuration, (timer) async {
+      timer = Timer.periodic(timerDuration, (t) async {
         if (controller.isClosed) {
-          timer.cancel();
+          t.cancel();
           return;
         }
 
         LocationFix? fixToUse = latestFix;
+
+        // The distance-filtered stream stays silent while the phone is still,
+        // so an unchanged cache + a recent point means "still here": skip
+        // without waking the GPS.
+        final recordedFix = lastRecordedFix;
+        final recordedAt = lastRecordedAt;
+        if (fixToUse != null &&
+            identical(fixToUse, recordedFix) &&
+            recordedAt != null &&
+            DateTime.now().difference(recordedAt) < _stillHeartbeat) {
+          return;
+        }
 
         if (fixToUse == null ||
             DateTime.now().difference(fixToUse.timestampUtc).inSeconds > 30) {
           if (kDebugMode) {
             debugPrint('[LocationStream] Cache stale, fetching current position');
           }
-          final currentResult = await _fixNow(request);
+          final currentResult = await _fixNow(fixRequest);
           if (currentResult case Ok(value: final fix)) {
             fixToUse = fix;
             latestFix = fix;
