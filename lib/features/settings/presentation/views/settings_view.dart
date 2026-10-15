@@ -3,7 +3,7 @@ import 'package:dawarich/core/di/providers/session_providers.dart';
 import 'package:dawarich/core/di/providers/settings_providers.dart';
 import 'package:dawarich/core/shell/drawer/drawer.dart';
 import 'package:dawarich/features/app_update/app_update.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:dawarich/features/app_update/app_update_installer.dart';
 import 'package:dawarich/features/settings/application/usecases/check_biometric_availability_usecase.dart';
 import 'package:dawarich/shared/widgets/app_scaffold.dart';
 import 'package:flutter/material.dart';
@@ -259,11 +259,10 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
           if (update != null)
             FilledButton(
               onPressed: () {
-                launchUrl(Uri.parse(update.apkUrl),
-                    mode: LaunchMode.externalApplication);
                 Navigator.pop(ctx);
+                downloadAndInstallUpdate(context, update);
               },
-              child: const Text('Download'),
+              child: const Text('Update'),
             ),
         ],
       ),

@@ -10,5 +10,6 @@ class MainActivity : FlutterFragmentActivity() {
 
         SystemSettingsChannel.register(flutterEngine, this)
         BuildConfigChannel.register(flutterEngine)
+        ApkInstallerChannel.register(flutterEngine, this)
     }
 }
