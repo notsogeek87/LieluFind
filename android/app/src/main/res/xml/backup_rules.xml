@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 et moins : seul ce qui est listé est sauvegardé. -->
+<full-backup-content>
+    <include domain="root" path="app_flutter/dawarich_db.sqlite" />
+    <include domain="root" path="app_flutter/lielu_backup_secrets.json" />
+</full-backup-content>
