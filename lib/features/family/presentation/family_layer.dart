@@ -4,6 +4,7 @@ import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
 import 'package:dawarich/core/di/providers/core_providers.dart';
+import 'package:dawarich/core/network/secondary_account.dart';
 import 'package:dawarich/features/family/domain/models/family_member_location.dart';
 import 'package:dawarich/features/family/presentation/family_photos.dart';
 import 'package:flutter/material.dart';
@@ -42,9 +43,42 @@ final familyLocationsProvider =
     };
   }
 
-  yield await fetch();
+  final cfg = await ref.watch(apiConfigManagerProvider.future);
+  final secondary = SecondaryAccount();
+  int? secondarySelfId;
+  String? secondarySelfKey;
+
+  /// Second account's family (optional). Any failure just yields nothing, so
+  /// the primary family is never affected.
+  Future<List<FamilyMemberLocation>> fetchSecondary() async {
+    final key = await secondary.readKey();
+    final host = cfg.apiConfig?.host;
+    if (key == null || host == null || host.isEmpty) return const [];
+
+    // The second account is "me" too: hide it, the phone already shows me.
+    if (secondarySelfKey != key || secondarySelfId == null) {
+      secondarySelfKey = key;
+      secondarySelfId = await secondary.fetchUserId(host, key);
+    }
+    final raw = await secondary.fetchFamilyLocations(host, key);
+    return raw
+        .map(FamilyMemberLocation.tryFromJson)
+        .whereType<FamilyMemberLocation>()
+        .where((m) => m.userId != secondarySelfId)
+        .toList();
+  }
+
+  Future<List<FamilyMemberLocation>> fetchAll() async {
+    final primary = await fetch();
+    final extra = await fetchSecondary();
+    if (extra.isEmpty) return primary;
+    final seen = primary.map((m) => m.userId).toSet();
+    return [...primary, ...extra.where((m) => seen.add(m.userId))];
+  }
+
+  yield await fetchAll();
   await for (final _ in Stream<void>.periodic(_refreshInterval)) {
-    yield await fetch();
+    yield await fetchAll();
   }
 });
 

@@ -13,7 +13,14 @@ import 'package:option_result/option_result.dart';
 final class ApiPointRepository implements IApiPointRepository {
 
   final DioClient _apiClient;
-  ApiPointRepository(this._apiClient);
+
+  /// Optional hook that copies each successfully uploaded batch to a second
+  /// account. It must never throw: the primary upload result is unaffected.
+  final Future<void> Function(Map<String, dynamic> batchJson)? _mirror;
+
+  ApiPointRepository(this._apiClient, {
+    Future<void> Function(Map<String, dynamic> batchJson)? mirror,
+  }) : _mirror = mirror;
 
   @override
   Future<Result<(), String>> uploadBatch(DawarichPointBatchDto batch) async {
@@ -29,6 +36,7 @@ final class ApiPointRepository implements IApiPointRepository {
           ));
 
       if (response.statusCode == 200) {
+        await _mirrorSafely(batch);
         return const Ok(());
       } else {
         return Err('HTTP ${response.statusCode}: ${response.statusMessage}');
@@ -36,6 +44,16 @@ final class ApiPointRepository implements IApiPointRepository {
     } on DioException catch (e) {
       // network / timeout / cancellation / 4xx/5xx
       return Err(e.message ?? 'The API rejected the batch.');
+    }
+  }
+
+  Future<void> _mirrorSafely(DawarichPointBatchDto batch) async {
+    final mirror = _mirror;
+    if (mirror == null) return;
+    try {
+      await mirror(batch.toJson());
+    } catch (_) {
+      // Best effort only.
     }
   }
 

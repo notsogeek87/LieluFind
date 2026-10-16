@@ -1,5 +1,8 @@
 import 'package:auto_route/annotations.dart';
+import 'package:dawarich/core/di/providers/core_providers.dart';
 import 'package:dawarich/core/di/providers/session_providers.dart';
+import 'package:dawarich/core/network/secondary_account.dart';
+import 'package:dawarich/features/family/presentation/family_layer.dart';
 import 'package:dawarich/core/di/providers/settings_providers.dart';
 import 'package:dawarich/core/shell/drawer/drawer.dart';
 import 'package:dawarich/features/app_update/app_update.dart';
@@ -168,6 +171,14 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
             ),
           ],
         ),
+
+        const SizedBox(height: 24),
+
+        // ── Second account ──
+        const _SectionHeader(
+            title: 'Second account', icon: Icons.group_add_outlined),
+        const SizedBox(height: 8),
+        const _SettingsCard(children: [_SecondaryAccountTile()]),
 
         const SizedBox(height: 24),
 
@@ -603,6 +614,114 @@ final class _PickerTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+
+/// Optional second account on the same server: its family is shown on the map
+/// and every uploaded point is copied to it.
+final class _SecondaryAccountTile extends ConsumerStatefulWidget {
+  const _SecondaryAccountTile();
+
+  @override
+  ConsumerState<_SecondaryAccountTile> createState() =>
+      _SecondaryAccountTileState();
+}
+
+class _SecondaryAccountTileState extends ConsumerState<_SecondaryAccountTile> {
+  final _store = SecondaryAccount();
+  bool _loading = true;
+  bool _configured = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    final key = await _store.readKey();
+    if (!mounted) return;
+    setState(() {
+      _configured = key != null;
+      _loading = false;
+    });
+  }
+
+  void _toast(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _edit() async {
+    final controller = TextEditingController();
+    final action = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Second account'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+                'API key of your second account on the same server. Its '
+                'family appears on the map and your position is sent to it too.'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autocorrect: false,
+              enableSuggestions: false,
+              decoration: const InputDecoration(labelText: 'API key'),
+            ),
+          ],
+        ),
+        actions: [
+          if (_configured)
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, 'remove'),
+                child: const Text('Remove')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, 'save'),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    final key = controller.text.trim();
+    controller.dispose();
+    if (action == null || !mounted) return;
+
+    if (action == 'remove') {
+      await _store.writeKey(null);
+    } else {
+      if (key.isEmpty) return;
+      final cfg = await ref.read(apiConfigManagerProvider.future);
+      final host = cfg.apiConfig?.host;
+      final id = host == null ? null : await _store.fetchUserId(host, key);
+      if (!mounted) return;
+      if (id == null) {
+        _toast('Key rejected by the server.');
+        return;
+      }
+      await _store.writeKey(key);
+    }
+    ref.invalidate(familyLocationsProvider);
+    await _refresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.group_add_outlined),
+      title: const Text('Second account'),
+      subtitle: Text(_loading
+          ? '…'
+          : _configured
+              ? 'Active: second family shown, positions mirrored'
+              : 'Not set'),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: _loading ? null : _edit,
     );
   }
 }

@@ -1,3 +1,4 @@
+import 'package:dawarich/core/network/secondary_account.dart';
 import 'package:dawarich/core/application/usecases/api/delete_point_usecase.dart';
 import 'package:dawarich/core/application/usecases/api/get_points_usecase.dart';
 import 'package:dawarich/core/application/usecases/api/get_total_pages_usecase.dart';
@@ -75,7 +76,15 @@ final statsCacheDataSourceProvider = FutureProvider<IStatsCacheDataSource>((ref)
 // --- Repositories ---
 final apiPointRepositoryProvider = FutureProvider<IApiPointRepository>((ref) async {
   final dio = await ref.watch(dioClientProvider.future);
-  return ApiPointRepository(dio);
+  final cfg = await ref.watch(apiConfigManagerProvider.future);
+  final secondary = SecondaryAccount();
+  return ApiPointRepository(dio, mirror: (batchJson) async {
+    // Read at call time so a key added in Settings applies immediately.
+    final key = await secondary.readKey();
+    final host = cfg.apiConfig?.host;
+    if (key == null || host == null || host.isEmpty) return;
+    await secondary.mirrorBatch(host, key, batchJson);
+  });
 });
 
 final pointLocalRepositoryProvider = FutureProvider<IPointLocalRepository>((ref) async {
