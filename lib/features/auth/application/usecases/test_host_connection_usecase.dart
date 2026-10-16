@@ -1,7 +1,6 @@
 
 import 'package:dawarich/core/application/errors/failure.dart';
 import 'package:dawarich/features/auth/application/repositories/connect_repository_interfaces.dart';
-import 'package:flutter/foundation.dart';
 import 'package:option_result/result.dart';
 
 final class TestHostConnectionUseCase {
@@ -54,7 +53,7 @@ final class TestHostConnectionUseCase {
       );
     }
 
-    // No protocol -> try https then http
+    // No protocol -> HTTPS only (cleartext traffic is disabled on Android)
     final httpsUrl = "https://$cleaned";
     final okHttps = await _connectRepository.testHost(httpsUrl);
 
@@ -62,25 +61,14 @@ final class TestHostConnectionUseCase {
       return Ok(httpsUrl);
     }
 
-    if (kDebugMode) {
-      debugPrint("[TestHost] HTTPS failed, trying HTTP for: $cleaned");
-    }
-
-    final httpUrl = "http://$cleaned";
-    final okHttp = await _connectRepository.testHost(httpUrl);
-
-    if (okHttp) {
-      return Ok(httpUrl);
-    }
-
     return Err(
       Failure(
         kind: FailureKind.network,
         code: 'HOST_UNREACHABLE',
-        message: 'Unable to reach server via HTTPS or HTTP.',
+        message: 'Unable to reach server via HTTPS.',
         context: {
           'where': 'TestHostConnectionUseCase',
-          'attempted': [httpsUrl, httpUrl],
+          'attempted': httpsUrl,
         },
       ),
     );
