@@ -698,10 +698,12 @@ class _SecondaryAccountTileState extends ConsumerState<_SecondaryAccountTile> {
       if (key.isEmpty) return;
       final cfg = await ref.read(apiConfigManagerProvider.future);
       final host = cfg.apiConfig?.host;
-      final id = host == null ? null : await _store.fetchUserId(host, key);
+      final error = host == null
+          ? 'no server configured'
+          : await _store.checkKey(host, key);
       if (!mounted) return;
-      if (id == null) {
-        _toast('Key rejected by the server.');
+      if (error != null) {
+        _toast('Key rejected: $error');
         return;
       }
       await _store.writeKey(key);

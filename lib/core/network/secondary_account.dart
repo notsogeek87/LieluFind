@@ -63,6 +63,21 @@ final class SecondaryAccount {
     }
   }
 
+  /// Checks the key against the server. Returns null when it is accepted,
+  /// otherwise a short reason to show the user.
+  Future<String?> checkKey(String host, String key) async {
+    try {
+      final res = await _dio(host, key).get<dynamic>('/api/v1/users/me');
+      return res.statusCode == 200 ? null : 'HTTP ${res.statusCode}';
+    } on DioException catch (e) {
+      final code = e.response?.statusCode;
+      if (code == 401 || code == 403) return 'wrong API key (HTTP $code)';
+      return code != null ? 'HTTP $code' : 'network error: ${e.type.name}';
+    } catch (e) {
+      return e.toString();
+    }
+  }
+
   /// Raw `locations` list of the second account's family. Never throws.
   Future<List<dynamic>> fetchFamilyLocations(String host, String key) async {
     try {
