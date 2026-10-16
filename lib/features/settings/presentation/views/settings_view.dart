@@ -3,6 +3,7 @@ import 'package:dawarich/core/di/providers/core_providers.dart';
 import 'package:dawarich/core/di/providers/session_providers.dart';
 import 'package:dawarich/core/network/secondary_account.dart';
 import 'package:dawarich/features/family/presentation/family_layer.dart';
+import 'package:dawarich/features/family/presentation/family_visibility.dart';
 import 'package:dawarich/core/di/providers/settings_providers.dart';
 import 'package:dawarich/core/shell/drawer/drawer.dart';
 import 'package:dawarich/features/app_update/app_update.dart';
@@ -171,6 +172,13 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
             ),
           ],
         ),
+
+        const SizedBox(height: 24),
+
+        // ── Map ──
+        const _SectionHeader(title: 'Map', icon: Icons.map_outlined),
+        const SizedBox(height: 8),
+        const _SettingsCard(children: [_PeopleOnMapTile()]),
 
         const SizedBox(height: 24),
 
@@ -781,6 +789,73 @@ class _SecondaryAccountTileState extends ConsumerState<_SecondaryAccountTile> {
             )
           : const Icon(Icons.chevron_right),
       onTap: _loading ? null : _edit,
+    );
+  }
+}
+
+
+/// Choose which people appear on the map. Lives in Settings (not on the map)
+/// so nobody hides someone by accident. Everybody is shown by default.
+final class _PeopleOnMapTile extends ConsumerWidget {
+  const _PeopleOnMapTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hidden = ref.watch(hiddenFamilyIdsProvider);
+    return ListTile(
+      leading: const Icon(Icons.people_outline),
+      title: const Text('People on the map'),
+      subtitle: Text(
+          hidden.isEmpty ? 'Everyone is shown' : '${hidden.length} hidden'),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => showDialog<void>(
+        context: context,
+        builder: (_) => const _PeopleOnMapDialog(),
+      ),
+    );
+  }
+}
+
+final class _PeopleOnMapDialog extends ConsumerWidget {
+  const _PeopleOnMapDialog();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hidden = ref.watch(hiddenFamilyIdsProvider);
+    final members = [...(ref.watch(familyLocationsProvider).value ?? const [])]
+      ..sort((a, b) => a.shortName.compareTo(b.shortName));
+    final notifier = ref.read(hiddenFamilyIdsProvider.notifier);
+
+    return AlertDialog(
+      title: const Text('People on the map'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: members.isEmpty
+            ? const Text('Nobody to show yet. People appear here once their '
+                'position is known.')
+            : ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final m in members)
+                    CheckboxListTile(
+                      value: !hidden.contains(m.userId),
+                      onChanged: (v) => notifier.setHidden(m.userId, v == false),
+                      title: Text(m.shortName),
+                      subtitle: Text(m.name),
+                      controlAffinity: ListTileControlAffinity.leading,
+                    ),
+                ],
+              ),
+      ),
+      actions: [
+        if (hidden.isNotEmpty)
+          TextButton(
+              onPressed: notifier.showEveryone,
+              child: const Text('Show everyone')),
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Done')),
+      ],
     );
   }
 }

@@ -7,6 +7,7 @@ import 'package:dawarich/core/di/providers/core_providers.dart';
 import 'package:dawarich/core/network/secondary_account.dart';
 import 'package:dawarich/features/family/domain/models/family_member_location.dart';
 import 'package:dawarich/features/family/presentation/family_photos.dart';
+import 'package:dawarich/features/family/presentation/family_visibility.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
@@ -216,7 +217,10 @@ final class _FamilyLayerState extends ConsumerState<FamilyLayer> {
 
   @override
   Widget build(BuildContext context) {
-    final members = ref.watch(familyLocationsProvider).value ?? const [];
+    final hidden = ref.watch(hiddenFamilyIdsProvider);
+    final members = (ref.watch(familyLocationsProvider).value ?? const [])
+        .where((m) => !hidden.contains(m.userId))
+        .toList();
     if (members.isEmpty) return const SizedBox.shrink();
     final photos = ref.watch(familyPhotosProvider);
     final mapController = MapController.maybeOf(context);
