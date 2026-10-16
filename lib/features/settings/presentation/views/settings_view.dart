@@ -712,6 +712,57 @@ class _SecondaryAccountTileState extends ConsumerState<_SecondaryAccountTile> {
     await _refresh();
   }
 
+  Future<void> _diagnose() async {
+    final cfg = await ref.read(apiConfigManagerProvider.future);
+    final host = cfg.apiConfig?.host;
+    final key = await _store.readKey();
+    String report;
+    if (host == null || key == null) {
+      report = 'No second account configured.';
+    } else {
+      final error = await _store.checkKey(host, key);
+      if (error != null) {
+        report = 'Key check failed: $error';
+      } else {
+        final selfId = await _store.fetchUserId(host, key);
+        final raw = await _store.fetchFamilyLocations(host, key);
+        final lines = <String>['Key OK (user id $selfId).'];
+        if (raw.isEmpty) {
+          lines.add('Server returned NO member with a position for this '
+              'account\'s family. Check: member of the family, location '
+              'sharing on, and at least one point received.');
+        }
+        for (final m in raw) {
+          if (m is! Map) continue;
+          final ts = (m['timestamp'] as num?)?.toInt();
+          final when = ts == null
+              ? 'unknown time'
+              : DateTime.fromMillisecondsSinceEpoch(ts * 1000)
+                  .toLocal()
+                  .toString()
+                  .split('.')
+                  .first;
+          final who = m['name'] ?? m['email'] ?? '?';
+          final me = m['user_id'] == selfId ? ' (this account)' : '';
+          lines.add('• $who$me — last point $when');
+        }
+        report = lines.join('\n');
+      }
+    }
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Second account check'),
+        content: SingleChildScrollView(child: Text(report)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListTile(
@@ -722,7 +773,13 @@ class _SecondaryAccountTileState extends ConsumerState<_SecondaryAccountTile> {
           : _configured
               ? 'Active: second family shown, positions mirrored'
               : 'Not set'),
-      trailing: const Icon(Icons.chevron_right),
+      trailing: _configured
+          ? IconButton(
+              icon: const Icon(Icons.fact_check_outlined),
+              tooltip: 'Check',
+              onPressed: _diagnose,
+            )
+          : const Icon(Icons.chevron_right),
       onTap: _loading ? null : _edit,
     );
   }
