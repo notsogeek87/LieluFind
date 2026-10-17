@@ -40,7 +40,8 @@ final class StartupService {
       sessionService.setUserId(refreshedSessionUser.id);
 
       // Après une mise à jour de l'APK, le service de fond est tué : on le relance.
-      await BackgroundTrackingService.restoreIfEnabled(container, refreshedSessionUser.id);
+      // Sans attendre : le ping de santé peut durer jusqu'à 16 s et bloquerait le splash.
+      unawaited(BackgroundTrackingService.restoreIfEnabled(container, refreshedSessionUser.id));
 
       // Initialize the lock tracker with persisted auth time for this user.
       final appSettingsRepo =
@@ -57,20 +58,27 @@ final class StartupService {
       container.read(themeModeProvider.notifier).set(
           themeModeFromString(savedTheme));
 
-      final refreshServerCompatibility =
-          await container.read(refreshServerCompatibilityUseCaseProvider.future);
-      await refreshServerCompatibility();
+      // Contrôle réseau en arrière-plan : le résultat s'affiche quand il arrive.
+      unawaited(() async {
+        try {
+          final refreshServerCompatibility =
+              await container.read(refreshServerCompatibilityUseCaseProvider.future);
+          await refreshServerCompatibility();
+        } catch (e) {
+          if (kDebugMode) debugPrint('[StartupService] compat check failed: $e');
+        }
+      }());
 
       // Register the lifecycle observer so stats auto-refresh on app resume.
       final lifecycleController = AppLifecycleController(container);
       WidgetsBinding.instance.addObserver(lifecycleController);
 
       // Register WorkManager periodic task for background stats refresh.
-      await initializeAndRegisterStatsWorker();
+      unawaited(initializeAndRegisterStatsWorker());
 
       // Register periodic batch upload worker (handles both threshold
       // and expiration uploads when the foreground service isn't running).
-      await registerBatchUploadWorker();
+      unawaited(registerBatchUploadWorker());
 
 
       final pendingRoute = InitializeTrackerNotificationServiceUseCase.pendingNotificationRoute;
