@@ -9,6 +9,7 @@ import 'package:dawarich/features/tracking/application/usecases/point_creation/s
 import 'package:dawarich/features/tracking/application/usecases/settings/watch_tracker_settings_usecase.dart';
 import 'package:dawarich/features/tracking/domain/models/tracker_settings.dart';
 import 'package:flutter/foundation.dart';
+import 'tracking_log.dart';
 import 'package:option_result/option_result.dart';
 
 final class PointAutomationService {
@@ -180,9 +181,11 @@ final class PointAutomationService {
         }
       } else if (result case Err(value: final err)) {
         debugPrint('[PointAutomation] Batch upload failed: $err');
+        unawaited(TrackingLog.addThrottled('upload', 'Envoi des points échoué : $err'));
       }
     } catch (e, s) {
       debugPrint('[PointAutomation] Upload error: $e\n$s');
+      unawaited(TrackingLog.addThrottled('upload', 'Erreur d\'envoi : $e'));
     } finally {
       _uploadBusy = false;
     }
@@ -234,8 +237,10 @@ final class PointAutomationService {
       },
       onError: (error, stackTrace) {
         debugPrint("[PointAutomation] Stream error: $error\n$stackTrace");
+        unawaited(TrackingLog.addThrottled('stream', 'Erreur du flux de localisation : $error'));
       },
       onDone: () {
+        unawaited(TrackingLog.add('Flux de localisation terminé'));
         if (kDebugMode) {
           debugPrint("[PointAutomation] Location stream completed");
         }
@@ -269,6 +274,7 @@ final class PointAutomationService {
 
   Future<void> stopTracking() async {
     if (!_isTracking) return;
+    unawaited(TrackingLog.add('stopTracking appelé'));
 
     if (kDebugMode) {
       debugPrint("[PointAutomation] Stopping automatic tracking...");
@@ -328,11 +334,14 @@ final class PointAutomationService {
 
         if (storeResult case Ok()) {
           _lastPointTime = DateTime.now();
+          unawaited(TrackingLog.addThrottled('point', 'Point enregistré', every: const Duration(minutes: 10)));
         } else if (storeResult case Err(value: final err)) {
           debugPrint("[PointAutomation] Failed to store point: $err");
+          unawaited(TrackingLog.addThrottled('store', 'Point non enregistré : $err'));
         }
       } else if (result case Err(value: final err)) {
         debugPrint("[PointAutomation] Point creation error: $err");
+        unawaited(TrackingLog.addThrottled('create', 'Position introuvable : $err'));
       }
     } catch (e, s) {
       debugPrint("[PointAutomation] Error handling location update: $e\n$s");

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:dawarich/core/presentation/safe_change_notifier.dart';
 import 'package:dawarich/features/tracking/application/services/background_tracking_service.dart';
+import 'package:dawarich/features/tracking/application/services/tracking_log.dart';
 import 'package:dawarich/features/tracking/application/usecases/point_creation/create_point_from_gps_workflow.dart';
 import 'package:dawarich/features/tracking/application/usecases/point_creation/store_point_usecase.dart';
 import 'package:dawarich/features/tracking/application/usecases/settings/get_device_model_usecase.dart';
@@ -416,6 +417,7 @@ final class TrackerPageViewModel extends ChangeNotifier with SafeChangeNotifier 
       return;
     }
 
+    unawaited(TrackingLog.add('Bouton tracking auto → ${enable ? 'ACTIVÉ' : 'DÉSACTIVÉ'}'));
     final TrackerSettings updated = trackerSettingsCopy.copyWith(
         automaticTracking: enable);
 

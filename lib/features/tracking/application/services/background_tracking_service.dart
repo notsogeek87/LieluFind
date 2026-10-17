@@ -13,6 +13,7 @@ import 'package:dawarich/core/di/providers/usecase_providers.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'background_tracking_entrypoint.dart';
+import 'tracking_log.dart';
 import 'package:dawarich/features/tracking/application/usecases/get_batch_point_count_usecase.dart';
 import 'package:dawarich/features/tracking/application/usecases/get_last_point_usecase.dart';
 
@@ -36,6 +37,7 @@ class BackgroundTrackingEntry {
     if (kDebugMode) {
       debugPrint('[Background] Injecting background thread dependencies...');
     }
+    await TrackingLog.add('Service de fond démarré');
 
     // Retry container initialization in case of race condition with foreground
     // (e.g., DB locked during migration, session validation fails)
@@ -66,7 +68,9 @@ class BackgroundTrackingEntry {
         if (kDebugMode) {
           debugPrint('[Background] No user in session (attempt $attempt/3)');
         }
+        await TrackingLog.add('Pas de session utilisateur (essai $attempt/3)');
       } catch (e, s) {
+        await TrackingLog.add('Erreur d\'initialisation (essai $attempt/3) : $e');
         if (kDebugMode) {
           debugPrint('[Background] Error during initialization (attempt $attempt/3): $e\n$s');
         }
@@ -85,6 +89,7 @@ class BackgroundTrackingEntry {
     try {
       final getSettings = await container.read(getTrackerSettingsUseCaseProvider.future);
       final settings = await getSettings(user.id);
+      await TrackingLog.add('Réglage tracking auto = ${settings.automaticTracking}');
       if (!settings.automaticTracking) {
         if (kDebugMode) {
           debugPrint('[Background] Auto tracking OFF → shutting down.');
@@ -93,6 +98,7 @@ class BackgroundTrackingEntry {
         return;
       }
     } catch (e, s) {
+      await TrackingLog.add('Lecture des réglages impossible : $e');
       if (kDebugMode) {
         debugPrint('[Background] Failed to load tracker settings ($e) → shutting down.\n$s');
       }
@@ -114,6 +120,7 @@ class BackgroundTrackingEntry {
 
     final automation = await container.read(pointAutomationServiceProvider.future);
     await automation.startTracking(userId);
+    await TrackingLog.add('Tracking démarré (user $userId)');
 
     try {
       final getLastPoint = await container.read(getLastPointUseCaseProvider.future);
@@ -159,6 +166,7 @@ class BackgroundTrackingEntry {
   }
 
   static Future<void> shutdown(ServiceInstance svc, String reason) async {
+    await TrackingLog.add('ARRÊT du service : $reason');
     if (kDebugMode) {
       debugPrint('[Background] Shutting down: $reason');
     }
@@ -295,6 +303,8 @@ final class BackgroundTrackingService {
       if (!settings.automaticTracking) return;
 
       final result = await start();
+      final outcome = switch (result) { Ok() => 'ok', Err(value: final m) => 'échec ($m)' };
+      await TrackingLog.add('Relance à l\'ouverture de l\'app : $outcome');
       if (kDebugMode) debugPrint('[Tracker] restoreIfEnabled → $result');
     } catch (e, s) {
       if (kDebugMode) debugPrint('[Tracker] restoreIfEnabled failed: $e\n$s');
@@ -305,6 +315,7 @@ final class BackgroundTrackingService {
 
     if (!(await Permission.notification.isGranted)) {
       debugPrint('[BackgroundService] Notification permission missing.');
+      await TrackingLog.add('Démarrage refusé : permission notification manquante');
       return Err("Notification permission is required.");
     }
 
@@ -313,6 +324,7 @@ final class BackgroundTrackingService {
     final hasBgPermission = always.isGranted;
 
     if (!locEnabled || !hasBgPermission) {
+      await TrackingLog.add('Démarrage refusé : localisation ${locEnabled ? 'ok' : 'désactivée'}, permission « toujours » ${hasBgPermission ? 'ok' : 'manquante'}');
       return Err("Background location permission is required.");
     }
 
@@ -321,10 +333,12 @@ final class BackgroundTrackingService {
     final isRunning = await FlutterBackgroundService().isRunning();
     if (isRunning) {
       debugPrint('[BackgroundService] Already running — skipping start.');
+      await TrackingLog.add('Service déjà en cours : pas de relance');
       return Ok(());
     }
 
     final started = await FlutterBackgroundService().startService();
+    await TrackingLog.add('startService → $started');
     return started
         ? Ok(())
         : Err("Failed to start background service.");

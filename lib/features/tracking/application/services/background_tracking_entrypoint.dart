@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 
 import 'background_tracking_service.dart';
+import 'tracking_log.dart';
 
 
 @pragma('vm:entry-point')
@@ -29,6 +30,7 @@ void backgroundTrackingEntry(ServiceInstance backgroundService) {
       await BackgroundTrackingEntry.checkBackgroundTracking(backgroundService);
     } catch (e, s) {
       debugPrint('[Background] Fatal in checkBackgroundTracking: $e\n$s');
+      await TrackingLog.add('Erreur fatale : $e');
       await BackgroundTrackingEntry.shutdown(backgroundService, 'fatal error');
     }
   }());

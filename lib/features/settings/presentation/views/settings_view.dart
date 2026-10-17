@@ -9,8 +9,10 @@ import 'package:dawarich/core/shell/drawer/drawer.dart';
 import 'package:dawarich/features/app_update/app_update.dart';
 import 'package:dawarich/features/app_update/app_update_installer.dart';
 import 'package:dawarich/features/settings/application/usecases/check_biometric_availability_usecase.dart';
+import 'package:dawarich/features/tracking/application/services/tracking_log.dart';
 import 'package:dawarich/shared/widgets/app_scaffold.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 @RoutePage()
@@ -234,9 +236,48 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
               subtitle: Text(_updateStatus ?? 'Tap to check for a new version'),
               onTap: _checkingUpdate ? null : _checkForUpdates,
             ),
+            ListTile(
+              leading: const Icon(Icons.bug_report_outlined),
+              title: const Text('Journal du tracking'),
+              subtitle: const Text('Démarrages, arrêts et erreurs du service'),
+              onTap: _showTrackingLog,
+            ),
           ],
         ),
       ],
+    );
+  }
+
+  Future<void> _showTrackingLog() async {
+    final text = await TrackingLog.read();
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Journal du tracking'),
+        content: SingleChildScrollView(
+          reverse: true,
+          child: SelectableText(
+            text.isEmpty ? 'Journal vide.' : text,
+            style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await TrackingLog.clear();
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            child: const Text('Effacer'),
+          ),
+          TextButton(
+            onPressed: () => Clipboard.setData(ClipboardData(text: text)),
+            child: const Text('Copier'),
+          ),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+        ],
+      ),
     );
   }
 
