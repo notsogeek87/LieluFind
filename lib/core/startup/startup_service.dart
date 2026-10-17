@@ -10,6 +10,7 @@ import 'package:dawarich/core/shell/life_cycle/life_cycle_controller.dart';
 import 'package:dawarich/core/di/providers/settings_providers.dart';
 import 'package:dawarich/features/biometric_lock/domain/app_lock_timestamp_tracker.dart';
 import 'package:dawarich/features/onboarding/application/usecases/check_onboarding_permissions_usecase.dart';
+import 'package:dawarich/features/tracking/application/services/background_tracking_service.dart';
 import 'package:dawarich/features/tracking/application/usecases/notifications/initialize_tracker_notification_usecase.dart';
 import 'package:dawarich/main.dart';
 import 'package:dawarich_android_user_module/dawarich_android_user_module.dart';
@@ -37,6 +38,9 @@ final class StartupService {
       }
 
       sessionService.setUserId(refreshedSessionUser.id);
+
+      // Après une mise à jour de l'APK, le service de fond est tué : on le relance.
+      await BackgroundTrackingService.restoreIfEnabled(container, refreshedSessionUser.id);
 
       // Initialize the lock tracker with persisted auth time for this user.
       final appSettingsRepo =

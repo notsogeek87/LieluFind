@@ -284,6 +284,23 @@ final class BackgroundTrackingService {
     }
   }
 
+  /// Relance le service si le tracking automatique est activé mais que le
+  /// service ne tourne plus (mise à jour de l'APK, kill système, redémarrage).
+  /// Ne touche jamais au réglage : un échec (permission manquante) laisse le
+  /// bouton activé.
+  static Future<void> restoreIfEnabled(ProviderContainer container, int userId) async {
+    try {
+      final getSettings = await container.read(getTrackerSettingsUseCaseProvider.future);
+      final settings = await getSettings(userId);
+      if (!settings.automaticTracking) return;
+
+      final result = await start();
+      if (kDebugMode) debugPrint('[Tracker] restoreIfEnabled → $result');
+    } catch (e, s) {
+      if (kDebugMode) debugPrint('[Tracker] restoreIfEnabled failed: $e\n$s');
+    }
+  }
+
   static Future<Result<(), String>> start() async {
 
     if (!(await Permission.notification.isGranted)) {
