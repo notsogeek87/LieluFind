@@ -50,15 +50,26 @@ final class LocationProvider implements ILocationProvider {
   @override
   Stream<LocationFix> getLocationStream(LocationRequest request) {
     final Stream<Position> positionStream = Geolocator.getPositionStream(
-      locationSettings: _toLocationSettings(request),
+      locationSettings: _toLocationSettings(request, keepAwake: true),
     );
 
     return positionStream.map(_toFix);
   }
 
-  LocationSettings _toLocationSettings(LocationRequest request) {
+  /// [keepAwake]: long-lived stream. Without a CPU wake lock, a still phone with
+  /// its screen off (Pixel/Doze) sleeps: the distance-filtered stream stays
+  /// silent, the heartbeat timer never fires and sharing silently stops.
+  LocationSettings _toLocationSettings(LocationRequest request, {bool keepAwake = false}) {
     if (Platform.isAndroid) {
       return AndroidSettings(
+        foregroundNotificationConfig: keepAwake
+            ? const ForegroundNotificationConfig(
+                notificationTitle: 'LieluFind',
+                notificationText: 'Partage de position actif',
+                enableWakeLock: true,
+                setOngoing: true,
+              )
+            : null,
         accuracy: _toGeolocatorAccuracy(request.precision),
         distanceFilter: request.distanceFilterMeters ?? 0,
         timeLimit: request.timeLimit,
