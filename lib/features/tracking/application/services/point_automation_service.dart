@@ -24,6 +24,7 @@ final class PointAutomationService {
   Timer? _watchdogTimer;
   DateTime? _lastUploadAttemptAt;
   DateTime? _lastUploadOkAt;
+  int _uploadFailStreak = 0;
   int? _currentUserId;
   StreamSubscription<Result<dynamic, String>>? _locationStreamSub;
   StreamSubscription<TrackerSettings>? _settingsWatchSub;
@@ -137,7 +138,10 @@ final class PointAutomationService {
   void _retryPendingUpload(int userId) {
     if (_lastKnownBatchCount <= 0) return;
     final last = _lastUploadAttemptAt;
-    if (last != null && DateTime.now().difference(last) < const Duration(seconds: 60)) return;
+    // Réseau ou serveur en panne : espacer les essais (1, 2, 4, 8 min… plafonné à 10 min)
+    // pour ne pas réveiller la radio en boucle.
+    final minutes = (1 << _uploadFailStreak.clamp(0, 4)).clamp(1, 10);
+    if (last != null && DateTime.now().difference(last) < Duration(minutes: minutes)) return;
     unawaited(_uploadCurrentBatch(userId));
   }
 
@@ -256,17 +260,20 @@ final class PointAutomationService {
         final result = await _batchUploadWorkflow(batch, userId);
         if (result case Ok()) {
           _lastUploadOkAt = DateTime.now();
+          _uploadFailStreak = 0;
           unawaited(TrackingLog.addThrottled('upload-ok', 'Envoi OK : ${batch.length} point(s) en ${sw.elapsedMilliseconds} ms', every: const Duration(minutes: 10)));
           if (kDebugMode) {
             debugPrint('[PointAutomation] Batch upload successful.');
           }
         } else if (result case Err(value: final err)) {
           debugPrint('[PointAutomation] Batch upload failed: $err');
+          _uploadFailStreak++;
           unawaited(TrackingLog.addThrottled('upload', 'Envoi des points échoué (conservés localement, ${batch.length} en attente) : $err'));
         }
       }, onStuck: (m) => unawaited(TrackingLog.add('Envoi : $m')));
     } catch (e, s) {
       debugPrint('[PointAutomation] Upload error: $e\n$s');
+      _uploadFailStreak++;
       unawaited(TrackingLog.addThrottled('upload', 'Erreur d\'envoi (points conservés) : $e'));
     }
   }
