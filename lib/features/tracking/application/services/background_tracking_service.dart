@@ -12,6 +12,7 @@ import 'package:dawarich/core/di/providers/usecase_providers.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'background_tracking_entrypoint.dart';
+import 'package:dawarich/features/tracking/application/usecases/system_settings/check_system_settings_usecase.dart';
 import 'tracking_log.dart';
 import 'tracking_service_restorer.dart';
 import 'tracking_supervisor.dart';
@@ -103,6 +104,23 @@ class BackgroundTrackingEntry {
     await _startBackgroundTracking(backgroundService, boot.container, boot.userId!);
   }
 
+  /// État des réglages Android qui décident de la survie du suivi écran éteint.
+  static Future<void> _logEnvironment() async {
+    try {
+      final battery = await Permission.ignoreBatteryOptimizations.status;
+      final always = await Permission.locationAlways.status;
+      final notif = await Permission.notification.status;
+      await TrackingLog.add('Environnement : batterie sans restriction=${battery.isGranted}, '
+          'localisation toujours=${always.isGranted}, notifications=${notif.isGranted}');
+      if (!battery.isGranted) {
+        await TrackingLog.add('⚠ Optimisation de batterie ACTIVE : Android peut suspendre le réseau '
+            'écran éteint (Doze). Réglage à passer sur « Sans restriction ».');
+      }
+    } catch (e) {
+      await TrackingLog.add('Environnement illisible : $e');
+    }
+  }
+
   static Future<void> _startBackgroundTracking(
     ServiceInstance backgroundService,
     ProviderContainer container,
@@ -115,6 +133,7 @@ class BackgroundTrackingEntry {
     final automation = await container.read(pointAutomationServiceProvider.future);
     await automation.startTracking(userId);
     await TrackingLog.add('Tracking démarré (user $userId)');
+    unawaited(_logEnvironment());
 
     try {
       final getLastPoint = await container.read(getLastPointUseCaseProvider.future);
@@ -147,7 +166,11 @@ class BackgroundTrackingEntry {
       try {
         final container = _container;
         if (container != null) {
-          final automation = await container.read(pointAutomationServiceProvider.future);
+          // Ne jamais bloquer la réponse : une réponse « lente » vaut mieux qu'un silence
+          // que l'interface prendrait pour un service mort.
+          final automation = await container
+              .read(pointAutomationServiceProvider.future)
+              .timeout(const Duration(seconds: 2));
           snapshot.addAll(automation.healthSnapshot());
         } else {
           snapshot['error'] = 'initialisation en cours';
@@ -319,7 +342,16 @@ final class BackgroundTrackingService {
       final restorer = TrackingServiceRestorer(
         readAutomaticTracking: () async {
           final getSettings = await container.read(getTrackerSettingsUseCaseProvider.future);
-          return (await getSettings(userId)).automaticTracking;
+          final enabled = (await getSettings(userId)).automaticTracking;
+          if (enabled && await CheckSystemSettingsUseCase()()) {
+            unawaited(TrackingLog.addThrottled(
+                'battery',
+                '⚠ Optimisation de batterie ACTIVE pour LieluFind : écran éteint, Android peut suspendre '
+                'le réseau (les positions ne partent qu\'à l\'ouverture de l\'app). Réglages Android → '
+                'Applications → LieluFind → Batterie → Sans restriction.',
+                every: const Duration(hours: 1)));
+          }
+          return enabled;
         },
         isRunning: () => FlutterBackgroundService().isRunning(),
         startService: () async {
@@ -347,8 +379,14 @@ final class BackgroundTrackingService {
       if (!completer.isCompleted) completer.complete(Map<String, Object?>.from(event ?? {}));
     });
     try {
-      service.invoke('healthPing', {});
-      return await completer.future.timeout(const Duration(seconds: 5), onTimeout: () => null);
+      // Un isolate endormi (écran éteint) peut mettre quelques secondes à se réveiller :
+      // deux essais avant de conclure qu'il est muet.
+      for (var attempt = 1; attempt <= 2; attempt++) {
+        service.invoke('healthPing', {});
+        final pong = await completer.future.timeout(const Duration(seconds: 8), onTimeout: () => null);
+        if (pong != null) return pong;
+      }
+      return null;
     } finally {
       await sub.cancel();
     }

@@ -22,6 +22,8 @@ final class PointAutomationService {
   final SingleFlightGuard _uploadGuard = SingleFlightGuard(stuckAfter: const Duration(minutes: 3));
   TrackingSupervisor? _supervisor;
   Timer? _watchdogTimer;
+  DateTime? _lastUploadAttemptAt;
+  DateTime? _lastUploadOkAt;
   int? _currentUserId;
   StreamSubscription<Result<dynamic, String>>? _locationStreamSub;
   StreamSubscription<TrackerSettings>? _settingsWatchSub;
@@ -81,6 +83,8 @@ final class PointAutomationService {
       'lastFixAt': sup?.lastFixAt?.toIso8601String(),
       'issue': sup?.evaluate()?.name,
       'recoveryAttempts': sup?.attempts ?? 0,
+      'pendingPoints': _lastKnownBatchCount,
+      'lastUploadOkAt': _lastUploadOkAt?.toIso8601String(),
     };
   }
 
@@ -120,10 +124,21 @@ final class PointAutomationService {
     _supervisor = sup;
     _watchdogTimer = Timer.periodic(_watchdogPeriod, (_) {
       if (!_isTracking) return;
+      _retryPendingUpload(userId);
       unawaited(sup.check().catchError((Object e) {
         unawaited(TrackingLog.add('Erreur du watchdog : $e'));
       }));
     });
+  }
+
+  /// Des points sont en attente et aucun envoi n'a été tenté depuis un moment
+  /// (réseau suspendu par Doze, serveur injoignable) : on réessaie sans attendre
+  /// qu'un nouveau point arrive.
+  void _retryPendingUpload(int userId) {
+    if (_lastKnownBatchCount <= 0) return;
+    final last = _lastUploadAttemptAt;
+    if (last != null && DateTime.now().difference(last) < const Duration(seconds: 60)) return;
+    unawaited(_uploadCurrentBatch(userId));
   }
 
   Future<void> _stopLocationStream() async {
@@ -236,14 +251,18 @@ final class PointAutomationService {
         final batch = await _getCurrentBatch(userId);
         if (batch.isEmpty) return;
 
+        _lastUploadAttemptAt = DateTime.now();
+        final sw = Stopwatch()..start();
         final result = await _batchUploadWorkflow(batch, userId);
         if (result case Ok()) {
+          _lastUploadOkAt = DateTime.now();
+          unawaited(TrackingLog.addThrottled('upload-ok', 'Envoi OK : ${batch.length} point(s) en ${sw.elapsedMilliseconds} ms', every: const Duration(minutes: 10)));
           if (kDebugMode) {
             debugPrint('[PointAutomation] Batch upload successful.');
           }
         } else if (result case Err(value: final err)) {
           debugPrint('[PointAutomation] Batch upload failed: $err');
-          unawaited(TrackingLog.addThrottled('upload', 'Envoi des points échoué (conservés localement) : $err'));
+          unawaited(TrackingLog.addThrottled('upload', 'Envoi des points échoué (conservés localement, ${batch.length} en attente) : $err'));
         }
       }, onStuck: (m) => unawaited(TrackingLog.add('Envoi : $m')));
     } catch (e, s) {
@@ -393,6 +412,8 @@ final class PointAutomationService {
           if (storeResult case Ok()) {
             _lastPointTime = DateTime.now();
             _supervisor?.onPoint();
+            // Envoi immédiat, sans dépendre du flux réactif de la base.
+            unawaited(_uploadCurrentBatch(userId));
             unawaited(TrackingLog.addThrottled('point', 'Point enregistré', every: const Duration(minutes: 10)));
           } else if (storeResult case Err(value: final err)) {
             debugPrint("[PointAutomation] Failed to store point: $err");
