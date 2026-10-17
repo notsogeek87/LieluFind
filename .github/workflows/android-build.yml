@@ -1,10 +1,16 @@
 name: Android build
 
+# Pas de trigger pull_request : chaque push est déjà buildé, sinon push + PR
+# lançaient deux builds identiques.
 on:
   push:
     branches: ["**"]
-  pull_request:
-    branches: ["**"]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - "**.MD"
+      - "fastlane/**"
+      - "distribution/**"
   workflow_dispatch:
 
 permissions:
@@ -64,6 +70,13 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
+      - name: Cache build_runner
+        uses: actions/cache@v4
+        with:
+          path: .dart_tool/build
+          key: build-runner-${{ runner.os }}-${{ hashFiles('pubspec.lock', 'build.yaml', 'lib/**/*.dart') }}
+          restore-keys: build-runner-${{ runner.os }}-
+
       - name: Générer le code (build_runner)
         run: dart run build_runner build --delete-conflicting-outputs
 
@@ -97,6 +110,7 @@ jobs:
       - name: Compiler l'APK FOSS (release)
         run: |
           flutter build apk --release --flavor foss \
+            --target-platform android-arm64 \
             --build-name=${{ steps.version.outputs.base }} \
             --build-number=${{ github.run_number }}
 
