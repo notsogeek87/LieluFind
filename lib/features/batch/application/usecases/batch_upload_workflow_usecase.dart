@@ -14,6 +14,9 @@ final class BatchUploadWorkflowUseCase {
   final IApiPointRepository _api;
   final IPointLocalRepository _localPointRepository;
 
+  /// Après autant d'échecs individuels d'affilée, on abandonne cet envoi.
+  static const int _maxConsecutiveFailures = 3;
+
   BatchUploadWorkflowUseCase(
       this._api,
       this._localPointRepository,
@@ -66,8 +69,16 @@ final class BatchUploadWorkflowUseCase {
 
       int failedCount = 0;
       int uploadedCount = 0;
+      int consecutiveFailures = 0;
 
       for (final LocalPoint point in failedChunks) {
+        // Serveur ou réseau injoignable : inutile d'enchaîner des dizaines de
+        // timeouts. Les points restent en local et repartent au prochain envoi.
+        if (consecutiveFailures >= _maxConsecutiveFailures) {
+          failedCount += failedChunks.length - uploadedCount - failedCount;
+          break;
+        }
+
         final dto = DawarichPointBatch(points: [point.toApi()]).toDto();
         final result = await _api.uploadBatch(dto);
 
@@ -80,7 +91,9 @@ final class BatchUploadWorkflowUseCase {
           }
 
           failedCount++;
+          consecutiveFailures++;
         } else {
+          consecutiveFailures = 0;
           await _markAsUploaded([point.id], userId);
           uploadedCount++;
           onChunkUploaded?.call(uploadedCount, failedChunks.length);

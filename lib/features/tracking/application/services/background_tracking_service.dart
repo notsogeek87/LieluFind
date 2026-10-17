@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:dawarich/core/constants/notification.dart';
-import 'package:dawarich/core/domain/models/user.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -14,6 +13,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'background_tracking_entrypoint.dart';
 import 'tracking_log.dart';
+import 'tracking_service_restorer.dart';
+import 'tracking_supervisor.dart';
 import 'package:dawarich/features/tracking/application/usecases/get_batch_point_count_usecase.dart';
 import 'package:dawarich/features/tracking/application/usecases/get_last_point_usecase.dart';
 
@@ -33,80 +34,73 @@ class BackgroundTrackingEntry {
     return container;
   }
 
+  /// Mis à vrai par [shutdown] : interrompt la boucle d'initialisation.
+  static bool _stopRequested = false;
+
+  /// Au-delà, une session toujours introuvable est considérée comme une
+  /// déconnexion volontaire : le service s'arrête.
+  static const Duration _noSessionGiveUp = Duration(minutes: 30);
+
   static Future<void> checkBackgroundTracking(ServiceInstance backgroundService) async {
+    _stopRequested = false;
     if (kDebugMode) {
       debugPrint('[Background] Injecting background thread dependencies...');
     }
     await TrackingLog.add('Service de fond démarré');
 
-    // Retry container initialization in case of race condition with foreground
-    // (e.g., DB locked during migration, session validation fails)
-    User? user;
-    ProviderContainer? container;
-
-    for (int attempt = 1; attempt <= 3; attempt++) {
-      try {
-        // Dispose old container and create fresh one on retry
+    // Une base verrouillée ou une session pas encore lisible sont transitoires.
+    // On réessaie (délais progressifs) au lieu d'appeler stopSelf(), qui
+    // marquerait « arrêt manuel » et désarmerait le watchdog du plugin.
+    final startedAt = DateTime.now();
+    final boot = await retryUntilAvailable<_Boot>(
+      (attempt) async {
         if (attempt > 1) {
-          if (kDebugMode) {
-            debugPrint('[Background] Retry attempt $attempt/3 - recreating container...');
-          }
           _container?.dispose();
           _container = null;
-          await Future.delayed(const Duration(seconds: 2));
         }
 
-        container = await _ensureContainer();
+        final container = await _ensureContainer();
         final session = await container.read(sessionBoxProvider.future);
-        user = await session.refreshSession();
+        final user = await session.refreshSession();
 
-        if (user != null) {
-          session.setUserId(user.id);
-          break;
+        if (user == null) {
+          if (DateTime.now().difference(startedAt) > _noSessionGiveUp) {
+            return _Boot(container, null, false);
+          }
+          return null;
         }
 
-        if (kDebugMode) {
-          debugPrint('[Background] No user in session (attempt $attempt/3)');
-        }
-        await TrackingLog.add('Pas de session utilisateur (essai $attempt/3)');
-      } catch (e, s) {
-        await TrackingLog.add('Erreur d\'initialisation (essai $attempt/3) : $e');
-        if (kDebugMode) {
-          debugPrint('[Background] Error during initialization (attempt $attempt/3): $e\n$s');
-        }
-        // Dispose container on error to ensure clean retry
-        _container?.dispose();
-        _container = null;
-      }
-    }
+        session.setUserId(user.id);
+        final getSettings = await container.read(getTrackerSettingsUseCaseProvider.future);
+        final settings = await getSettings(user.id);
+        await TrackingLog.add('Réglage tracking auto = ${settings.automaticTracking}');
+        return _Boot(container, user.id, settings.automaticTracking);
+      },
+      sleep: (d) => Future<void>.delayed(d),
+      shouldStop: () => _stopRequested,
+      onFailure: (attempt, error) {
+        unawaited(TrackingLog.add(error == null
+            ? 'Pas de session utilisateur (essai $attempt), nouvel essai'
+            : 'Initialisation impossible (essai $attempt) : $error, nouvel essai'));
+      },
+    );
 
-    if (user == null || container == null) {
-      if (kDebugMode) debugPrint('[Background] No user in session after retries — exiting.');
+    if (boot == null) return; // arrêt demandé pendant l'attente
+
+    if (boot.userId == null) {
       await shutdown(backgroundService, 'No user session');
       return;
     }
 
-    try {
-      final getSettings = await container.read(getTrackerSettingsUseCaseProvider.future);
-      final settings = await getSettings(user.id);
-      await TrackingLog.add('Réglage tracking auto = ${settings.automaticTracking}');
-      if (!settings.automaticTracking) {
-        if (kDebugMode) {
-          debugPrint('[Background] Auto tracking OFF → shutting down.');
-        }
-        await shutdown(backgroundService, 'Auto tracking OFF');
-        return;
-      }
-    } catch (e, s) {
-      await TrackingLog.add('Lecture des réglages impossible : $e');
+    if (!boot.automaticTracking) {
       if (kDebugMode) {
-        debugPrint('[Background] Failed to load tracker settings ($e) → shutting down.\n$s');
+        debugPrint('[Background] Auto tracking OFF → shutting down.');
       }
-      await shutdown(backgroundService, 'Settings load failed');
+      await shutdown(backgroundService, 'Auto tracking OFF');
       return;
     }
 
-    await _startBackgroundTracking(backgroundService, container, user.id);
+    await _startBackgroundTracking(backgroundService, boot.container, boot.userId!);
   }
 
   static Future<void> _startBackgroundTracking(
@@ -148,6 +142,22 @@ class BackgroundTrackingEntry {
       }
     });
 
+    backgroundService.on('healthPing').listen((event) async {
+      final snapshot = <String, dynamic>{'alive': true, 'tracking': false};
+      try {
+        final container = _container;
+        if (container != null) {
+          final automation = await container.read(pointAutomationServiceProvider.future);
+          snapshot.addAll(automation.healthSnapshot());
+        } else {
+          snapshot['error'] = 'initialisation en cours';
+        }
+      } catch (e) {
+        snapshot['error'] = '$e';
+      }
+      backgroundService.invoke('healthPong', snapshot);
+    });
+
     backgroundService.on('restartTracking').listen((event) async {
       debugPrint('[Background] *** restartTracking event received ***');
       try {
@@ -166,6 +176,7 @@ class BackgroundTrackingEntry {
   }
 
   static Future<void> shutdown(ServiceInstance svc, String reason) async {
+    _stopRequested = true;
     await TrackingLog.add('ARRÊT du service : $reason');
     if (kDebugMode) {
       debugPrint('[Background] Shutting down: $reason');
@@ -296,18 +307,50 @@ final class BackgroundTrackingService {
   /// service ne tourne plus (mise à jour de l'APK, kill système, redémarrage).
   /// Ne touche jamais au réglage : un échec (permission manquante) laisse le
   /// bouton activé.
-  static Future<void> restoreIfEnabled(ProviderContainer container, int userId) async {
-    try {
-      final getSettings = await container.read(getTrackerSettingsUseCaseProvider.future);
-      final settings = await getSettings(userId);
-      if (!settings.automaticTracking) return;
+  static Future<void>? _restoring;
 
-      final result = await start();
-      final outcome = switch (result) { Ok() => 'ok', Err(value: final m) => 'échec ($m)' };
-      await TrackingLog.add('Relance à l\'ouverture de l\'app : $outcome');
-      if (kDebugMode) debugPrint('[Tracker] restoreIfEnabled → $result');
+  static Future<void> restoreIfEnabled(ProviderContainer container, int userId) {
+    // Démarrage + retour au premier plan peuvent se chevaucher : un seul contrôle à la fois.
+    return _restoring ??= _restore(container, userId).whenComplete(() => _restoring = null);
+  }
+
+  static Future<void> _restore(ProviderContainer container, int userId) async {
+    try {
+      final restorer = TrackingServiceRestorer(
+        readAutomaticTracking: () async {
+          final getSettings = await container.read(getTrackerSettingsUseCaseProvider.future);
+          return (await getSettings(userId)).automaticTracking;
+        },
+        isRunning: () => FlutterBackgroundService().isRunning(),
+        startService: () async {
+          final result = await start();
+          return switch (result) { Ok() => null, Err(value: final m) => m };
+        },
+        stopService: stop,
+        pingHealth: _pingHealth,
+        restartTracking: restartTracking,
+        log: (m) => unawaited(TrackingLog.add(m)),
+      );
+      final outcome = await restorer.restore();
+      if (kDebugMode) debugPrint('[Tracker] restoreIfEnabled → $outcome');
     } catch (e, s) {
       if (kDebugMode) debugPrint('[Tracker] restoreIfEnabled failed: $e\n$s');
+      unawaited(TrackingLog.add('Contrôle du service impossible : $e'));
+    }
+  }
+
+  /// Interroge l'isolate de fond ; `null` s'il ne répond pas dans les 5 s.
+  static Future<Map<String, Object?>?> _pingHealth() async {
+    final service = FlutterBackgroundService();
+    final completer = Completer<Map<String, Object?>?>();
+    final sub = service.on('healthPong').listen((event) {
+      if (!completer.isCompleted) completer.complete(Map<String, Object?>.from(event ?? {}));
+    });
+    try {
+      service.invoke('healthPing', {});
+      return await completer.future.timeout(const Duration(seconds: 5), onTimeout: () => null);
+    } finally {
+      await sub.cancel();
     }
   }
 
@@ -402,4 +445,11 @@ final class BackgroundTrackingService {
     service.invoke('restartTracking', {});
   }
 
+}
+
+class _Boot {
+  final ProviderContainer container;
+  final int? userId;
+  final bool automaticTracking;
+  const _Boot(this.container, this.userId, this.automaticTracking);
 }

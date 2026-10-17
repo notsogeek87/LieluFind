@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:dawarich/core/domain/models/point/local/local_point.dart';
 import 'package:dawarich/features/tracking/application/repositories/location_provider_interface.dart';
+import 'package:dawarich/features/tracking/application/services/tracking_supervisor.dart';
 import 'package:dawarich/features/tracking/application/usecases/point_creation/create_point_usecase.dart';
 import 'package:dawarich/features/tracking/application/usecases/settings/get_tracker_settings_usecase.dart';
 import 'package:dawarich/features/tracking/domain/enum/location_precision.dart';
@@ -36,7 +37,10 @@ final class CreatePointFromLocationStreamWorkflow {
   );
 
   /// Returns a stream of location points based on user settings.
-  Stream<Result<LocalPoint, String>> getPointStream(int userId) async* {
+  ///
+  /// [health] reçoit les signes de vie du flux (position, minuteur, erreur,
+  /// fin) pour que le superviseur détecte un flux muet ou terminé.
+  Stream<Result<LocalPoint, String>> getPointStream(int userId, {TrackingHealthSink? health}) async* {
     if (kDebugMode) {
       debugPrint('[LocationStream] Starting location stream for user $userId');
     }
@@ -52,9 +56,9 @@ final class CreatePointFromLocationStreamWorkflow {
     }
 
     if (isAutoMode) {
-      yield* _getAutoModePointStream(userId, precision, minimumDistance);
+      yield* _getAutoModePointStream(userId, precision, minimumDistance, health);
     } else {
-      yield* _getTimerPointStream(userId, precision, trackingFrequencySeconds);
+      yield* _getTimerPointStream(userId, precision, trackingFrequencySeconds, health);
     }
 
     if (kDebugMode) {
@@ -68,6 +72,7 @@ final class CreatePointFromLocationStreamWorkflow {
     int userId,
     LocationPrecision precision,
     int minimumDistance,
+    TrackingHealthSink? health,
   ) async* {
     // Hybrid approach:
     // - If user set a minimum distance, use that (they know what's meaningful to them)
@@ -100,6 +105,8 @@ final class CreatePointFromLocationStreamWorkflow {
       final locationStream = _locationProvider.getLocationStream(request);
 
       await for (final fix in locationStream) {
+        health?.onFix();
+        health?.onTick();
         if (isFirstPoint) {
           isFirstPoint = false;
           lastRecordedFix = fix;
@@ -138,7 +145,10 @@ final class CreatePointFromLocationStreamWorkflow {
           debugPrint('[LocationStream] Auto: Skipping similar location');
         }
       }
+      // Ce flux ne se termine pas normalement : fin = panne.
+      health?.onStreamDone();
     } catch (e, s) {
+      health?.onStreamError(e);
       if (kDebugMode) {
         debugPrint('[LocationStream] Auto mode error: $e\n$s');
       }
@@ -165,6 +175,9 @@ final class CreatePointFromLocationStreamWorkflow {
   /// (indoors, FOSS build) blocks the whole stream and no point is ever made.
   static const Duration _fixTimeout = Duration(seconds: 20);
 
+  /// Un enregistrement de point (batterie, wifi, base) qui dépasse ce délai est abandonné.
+  static const Duration _createPointTimeout = Duration(seconds: 30);
+
   /// A last-known fix older than this is not worth publishing.
   static const Duration _maxLastKnownAge = Duration(minutes: 10);
 
@@ -188,6 +201,7 @@ final class CreatePointFromLocationStreamWorkflow {
     int userId,
     LocationPrecision precision,
     int frequencySeconds,
+    TrackingHealthSink? health,
   ) async* {
     LocationFix? latestFix;
     LocationFix? lastRecordedFix;
@@ -216,15 +230,18 @@ final class CreatePointFromLocationStreamWorkflow {
       locationSub = locationStream.listen(
         (fix) {
           latestFix = fix;
+          health?.onFix();
           if (kDebugMode) {
             debugPrint('[LocationStream] Cache updated: ${fix.latitude}, ${fix.longitude}');
           }
         },
         onError: (e) {
+          health?.onStreamError(e);
           if (kDebugMode) {
             debugPrint('[LocationStream] Stream error: $e');
           }
         },
+        onDone: () => health?.onStreamDone(),
       );
 
       final controller = StreamController<Result<LocalPoint, String>>();
@@ -238,8 +255,10 @@ final class CreatePointFromLocationStreamWorkflow {
       final initialResult = await _fixNow(fixRequest);
       if (initialResult case Ok(value: final fix)) {
         latestFix = fix;
+        health?.onFix();
         final timestamp = DateTime.now().toUtc();
-        final pointResult = await _createPointFromLocationFix(fix, timestamp, userId);
+        final pointResult = await _createPointFromLocationFix(fix, timestamp, userId)
+            .timeout(_createPointTimeout);
         if (pointResult case Ok(value: final point)) {
           lastRecordedFix = fix;
           lastRecordedAt = DateTime.now();
@@ -248,17 +267,13 @@ final class CreatePointFromLocationStreamWorkflow {
       }
 
       final timerDuration = Duration(seconds: frequencySeconds);
+      bool tickBusy = false;
 
       if (kDebugMode) {
         debugPrint('[LocationStream] Timer mode: interval = ${frequencySeconds}s');
       }
 
-      timer = Timer.periodic(timerDuration, (t) async {
-        if (controller.isClosed) {
-          t.cancel();
-          return;
-        }
-
+      Future<void> onTick() async {
         LocationFix? fixToUse = latestFix;
 
         // The distance-filtered stream stays silent while the phone is still,
@@ -282,6 +297,7 @@ final class CreatePointFromLocationStreamWorkflow {
           if (currentResult case Ok(value: final fix)) {
             fixToUse = fix;
             latestFix = fix;
+            health?.onFix();
           }
         }
 
@@ -304,7 +320,8 @@ final class CreatePointFromLocationStreamWorkflow {
 
         try {
           final timestamp = DateTime.now().toUtc();
-          final pointResult = await _createPointFromLocationFix(fixToUse, timestamp, userId);
+          final pointResult = await _createPointFromLocationFix(fixToUse, timestamp, userId)
+              .timeout(_createPointTimeout);
 
           if (pointResult case Ok(value: final point)) {
             lastRecordedFix = fixToUse;
@@ -321,6 +338,23 @@ final class CreatePointFromLocationStreamWorkflow {
             debugPrint('[LocationStream] Error creating point: $e');
           }
           controller.add(Err('Failed to create point: $e'));
+        }
+      }
+
+      timer = Timer.periodic(timerDuration, (t) async {
+        if (controller.isClosed) {
+          t.cancel();
+          return;
+        }
+        health?.onTick();
+
+        // Un tick à la fois : un `getCurrent` lent ne doit pas empiler les appels.
+        if (tickBusy) return;
+        tickBusy = true;
+        try {
+          await onTick();
+        } finally {
+          tickBusy = false;
         }
       });
 

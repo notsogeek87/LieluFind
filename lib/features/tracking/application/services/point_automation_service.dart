@@ -9,13 +9,19 @@ import 'package:dawarich/features/tracking/application/usecases/point_creation/s
 import 'package:dawarich/features/tracking/application/usecases/settings/watch_tracker_settings_usecase.dart';
 import 'package:dawarich/features/tracking/domain/models/tracker_settings.dart';
 import 'package:flutter/foundation.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'tracking_log.dart';
+import 'tracking_supervisor.dart';
 import 'package:option_result/option_result.dart';
 
 final class PointAutomationService {
   bool _isTracking = false;
-  bool _writeBusy = false;
-  bool _uploadBusy = false;
+  /// Écriture locale / envoi : une tâche à la fois, mais jamais bloqué pour toujours.
+  final SingleFlightGuard _writeGuard = SingleFlightGuard(stuckAfter: const Duration(seconds: 45));
+  final SingleFlightGuard _uploadGuard = SingleFlightGuard(stuckAfter: const Duration(minutes: 3));
+  TrackingSupervisor? _supervisor;
+  Timer? _watchdogTimer;
   int? _currentUserId;
   StreamSubscription<Result<dynamic, String>>? _locationStreamSub;
   StreamSubscription<TrackerSettings>? _settingsWatchSub;
@@ -30,6 +36,9 @@ final class PointAutomationService {
   /// Uses the cached batch count — no DB query.
   static const _heartbeatInterval = Duration(seconds: 60);
 
+  /// Fréquence d'évaluation de la santé du suivi.
+  static const _watchdogPeriod = Duration(seconds: 30);
+
   final CreatePointFromLocationStreamWorkflow _createPointFromLocationStream;
   final StorePointUseCase _storePoint;
   final GetBatchPointCountUseCase _getBatchPointCount;
@@ -38,6 +47,7 @@ final class PointAutomationService {
   final BatchUploadWorkflowUseCase _batchUploadWorkflow;
   final WatchTrackerSettingsUseCase _watchTrackerSettings;
   final IPointLocalRepository _localPointRepository;
+  final Future<String?> Function() _blockedReason;
 
   PointAutomationService(
     this._createPointFromLocationStream,
@@ -47,8 +57,32 @@ final class PointAutomationService {
     this._getCurrentBatch,
     this._batchUploadWorkflow,
     this._watchTrackerSettings,
-    this._localPointRepository,
-  );
+    this._localPointRepository, {
+    Future<String?> Function()? blockedReason,
+  }) : _blockedReason = blockedReason ?? defaultBlockedReason;
+
+  /// Raison pour laquelle le suivi ne peut pas (re)démarrer maintenant, ou `null`.
+  static Future<String?> defaultBlockedReason() async {
+    if (!await Geolocator.isLocationServiceEnabled()) {
+      return 'localisation du téléphone désactivée';
+    }
+    if (!(await Permission.locationAlways.status).isGranted) {
+      return 'permission de localisation « toujours » absente';
+    }
+    return null;
+  }
+
+  /// Instantané de santé, renvoyé à l'interface via le service de fond.
+  Map<String, Object?> healthSnapshot() {
+    final sup = _supervisor;
+    return {
+      'tracking': _isTracking,
+      'lastPointAt': sup?.lastPointAt?.toIso8601String(),
+      'lastFixAt': sup?.lastFixAt?.toIso8601String(),
+      'issue': sup?.evaluate()?.name,
+      'recoveryAttempts': sup?.attempts ?? 0,
+    };
+  }
 
   /// Whether automatic tracking is currently active
   bool get isTracking => _isTracking;
@@ -68,8 +102,38 @@ final class PointAutomationService {
 
     _startHeartbeatTimer();
     _startSettingsWatch(userId);
+    _startSupervisor(userId);
     _startLocationStream(userId);
+    _supervisor?.markStarted();
     _startBatchCountWatch(userId);
+  }
+
+  void _startSupervisor(int userId) {
+    _watchdogTimer?.cancel();
+    final sup = TrackingSupervisor(
+      startStream: () async => _startLocationStream(userId),
+      stopStream: _stopLocationStream,
+      blockedReason: _blockedReason,
+      log: (m) => unawaited(TrackingLog.add(m)),
+      tickInterval: Duration(seconds: _currentSettings?.trackingFrequency ?? 10),
+    );
+    _supervisor = sup;
+    _watchdogTimer = Timer.periodic(_watchdogPeriod, (_) {
+      if (!_isTracking) return;
+      unawaited(sup.check().catchError((Object e) {
+        unawaited(TrackingLog.add('Erreur du watchdog : $e'));
+      }));
+    });
+  }
+
+  Future<void> _stopLocationStream() async {
+    final sub = _locationStreamSub;
+    _locationStreamSub = null;
+    try {
+      await sub?.cancel();
+    } catch (e) {
+      unawaited(TrackingLog.add('Annulation du flux : $e'));
+    }
   }
 
   // ── Heartbeat (OEM keep-alive) ─────────────────────────────────────────
@@ -165,29 +229,26 @@ final class PointAutomationService {
   // ── Upload helper ──────────────────────────────────────────────────────
 
   /// Fetches the current un-uploaded batch and uploads it.
-  /// Guarded by [_uploadBusy] to prevent overlapping uploads.
+  /// Guarded by [_uploadGuard] to prevent overlapping uploads.
   Future<void> _uploadCurrentBatch(int userId) async {
-    if (_uploadBusy) return;
-    _uploadBusy = true;
-
     try {
-      final batch = await _getCurrentBatch(userId);
-      if (batch.isEmpty) return;
+      await _uploadGuard.run(() async {
+        final batch = await _getCurrentBatch(userId);
+        if (batch.isEmpty) return;
 
-      final result = await _batchUploadWorkflow(batch, userId);
-      if (result case Ok()) {
-        if (kDebugMode) {
-          debugPrint('[PointAutomation] Batch upload successful.');
+        final result = await _batchUploadWorkflow(batch, userId);
+        if (result case Ok()) {
+          if (kDebugMode) {
+            debugPrint('[PointAutomation] Batch upload successful.');
+          }
+        } else if (result case Err(value: final err)) {
+          debugPrint('[PointAutomation] Batch upload failed: $err');
+          unawaited(TrackingLog.addThrottled('upload', 'Envoi des points échoué (conservés localement) : $err'));
         }
-      } else if (result case Err(value: final err)) {
-        debugPrint('[PointAutomation] Batch upload failed: $err');
-        unawaited(TrackingLog.addThrottled('upload', 'Envoi des points échoué : $err'));
-      }
+      }, onStuck: (m) => unawaited(TrackingLog.add('Envoi : $m')));
     } catch (e, s) {
       debugPrint('[PointAutomation] Upload error: $e\n$s');
-      unawaited(TrackingLog.addThrottled('upload', 'Erreur d\'envoi : $e'));
-    } finally {
-      _uploadBusy = false;
+      unawaited(TrackingLog.addThrottled('upload', 'Erreur d\'envoi (points conservés) : $e'));
     }
   }
 
@@ -229,7 +290,7 @@ final class PointAutomationService {
   void _startLocationStream(int userId) {
     _locationStreamSub?.cancel();
 
-    final pointStream = _createPointFromLocationStream.getPointStream(userId);
+    final pointStream = _createPointFromLocationStream.getPointStream(userId, health: _supervisor);
 
     _locationStreamSub = pointStream.listen(
       (result) async {
@@ -237,9 +298,11 @@ final class PointAutomationService {
       },
       onError: (error, stackTrace) {
         debugPrint("[PointAutomation] Stream error: $error\n$stackTrace");
+        _supervisor?.onStreamError(error);
         unawaited(TrackingLog.addThrottled('stream', 'Erreur du flux de localisation : $error'));
       },
       onDone: () {
+        _supervisor?.onStreamDone();
         unawaited(TrackingLog.add('Flux de localisation terminé'));
         if (kDebugMode) {
           debugPrint("[PointAutomation] Location stream completed");
@@ -287,6 +350,9 @@ final class PointAutomationService {
     _lastKnownBatchCount = 0;
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
+    _watchdogTimer?.cancel();
+    _watchdogTimer = null;
+    _supervisor = null;
     await _batchCountSub?.cancel();
     _batchCountSub = null;
     await _settingsWatchSub?.cancel();
@@ -315,38 +381,35 @@ final class PointAutomationService {
   /// picks up the count change and triggers the upload when the threshold
   /// is met.
   Future<void> _handleLocationUpdate(Result<dynamic, String> result, int userId) async {
-    if (_writeBusy) {
-      if (kDebugMode) {
-        debugPrint("[PointAutomation] Skipping location update, write busy.");
-      }
-      return;
-    }
-
-    _writeBusy = true;
-
     try {
-      if (result case Ok(value: final point)) {
-        if (kDebugMode) {
-          debugPrint("[PointAutomation] Storing point from location stream");
-        }
+      final ran = await _writeGuard.run(() async {
+        if (result case Ok(value: final point)) {
+          if (kDebugMode) {
+            debugPrint("[PointAutomation] Storing point from location stream");
+          }
 
-        final storeResult = await _storePoint(point);
+          final storeResult = await _storePoint(point);
 
-        if (storeResult case Ok()) {
-          _lastPointTime = DateTime.now();
-          unawaited(TrackingLog.addThrottled('point', 'Point enregistré', every: const Duration(minutes: 10)));
-        } else if (storeResult case Err(value: final err)) {
-          debugPrint("[PointAutomation] Failed to store point: $err");
-          unawaited(TrackingLog.addThrottled('store', 'Point non enregistré : $err'));
+          if (storeResult case Ok()) {
+            _lastPointTime = DateTime.now();
+            _supervisor?.onPoint();
+            unawaited(TrackingLog.addThrottled('point', 'Point enregistré', every: const Duration(minutes: 10)));
+          } else if (storeResult case Err(value: final err)) {
+            debugPrint("[PointAutomation] Failed to store point: $err");
+            unawaited(TrackingLog.addThrottled('store', 'Point non enregistré : $err'));
+          }
+        } else if (result case Err(value: final err)) {
+          debugPrint("[PointAutomation] Point creation error: $err");
+          unawaited(TrackingLog.addThrottled('create', 'Position introuvable : $err'));
         }
-      } else if (result case Err(value: final err)) {
-        debugPrint("[PointAutomation] Point creation error: $err");
-        unawaited(TrackingLog.addThrottled('create', 'Position introuvable : $err'));
+      }, onStuck: (m) => unawaited(TrackingLog.add('Écriture locale : $m')));
+
+      if (!ran && kDebugMode) {
+        debugPrint("[PointAutomation] Skipping location update, write busy.");
       }
     } catch (e, s) {
       debugPrint("[PointAutomation] Error handling location update: $e\n$s");
-    } finally {
-      _writeBusy = false;
+      unawaited(TrackingLog.addThrottled('store', 'Échec d\'écriture locale : $e'));
     }
   }
 }
