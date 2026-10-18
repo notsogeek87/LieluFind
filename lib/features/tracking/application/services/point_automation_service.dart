@@ -37,7 +37,15 @@ final class PointAutomationService {
   /// Heartbeat interval for re-posting the notification so aggressive OEMs
   /// (Xiaomi, Huawei, Samsung) don't kill the foreground service.
   /// Uses the cached batch count — no DB query.
-  static const _heartbeatInterval = Duration(seconds: 60);
+  static const _heartbeatInterval = Duration(minutes: 10);
+
+  /// Au plus un envoi par minute : en mouvement (un point toutes les 10 s), envoyer
+  /// chaque point garderait la radio 4G allumée en permanence.
+  static const _minUploadSpacing = Duration(seconds: 60);
+
+  /// Au plus une mise à jour de la notification par minute.
+  static const _minNotificationSpacing = Duration(seconds: 60);
+  DateTime? _lastNotificationAt;
 
   /// Fréquence d'évaluation de la santé du suivi.
   static const _watchdogPeriod = Duration(seconds: 30);
@@ -132,6 +140,14 @@ final class PointAutomationService {
     });
   }
 
+  /// Envoie maintenant si le dernier envoi date d'au moins [_minUploadSpacing] ;
+  /// sinon le watchdog s'en charge au tick suivant (30 s).
+  void _requestUpload(int userId) {
+    final last = _lastUploadAttemptAt;
+    if (last != null && DateTime.now().difference(last) < _minUploadSpacing) return;
+    unawaited(_uploadCurrentBatch(userId));
+  }
+
   /// Des points sont en attente et aucun envoi n'a été tenté depuis un moment
   /// (réseau suspendu par Doze, serveur injoignable) : on réessaie sans attendre
   /// qu'un nouveau point arrive.
@@ -165,12 +181,8 @@ final class PointAutomationService {
     _heartbeatTimer = Timer.periodic(
       _heartbeatInterval,
       (_) {
-        _refreshNotificationWithCount(_lastKnownBatchCount);
-        // Retry anything left over from a failed upload (offline, server down).
-        final userId = _currentUserId;
-        if (_lastKnownBatchCount > 0 && userId != null) {
-          unawaited(_uploadCurrentBatch(userId));
-        }
+        // Les envois en attente sont relancés par le watchdog, avec temporisation.
+        _refreshNotificationWithCount(_lastKnownBatchCount, force: true);
       },
     );
   }
@@ -190,7 +202,11 @@ final class PointAutomationService {
 
   /// Updates the notification using an already-known batch count,
   /// avoiding an extra DB query.
-  void _refreshNotificationWithCount(int batchCount) {
+  void _refreshNotificationWithCount(int batchCount, {bool force = false}) {
+    final now = DateTime.now();
+    final last = _lastNotificationAt;
+    if (!force && last != null && now.difference(last) < _minNotificationSpacing) return;
+    _lastNotificationAt = now;
     try {
       String body;
       if (_lastPointTime != null) {
@@ -236,7 +252,7 @@ final class PointAutomationService {
           if (kDebugMode) {
             debugPrint('[PointAutomation] $count pending point(s) — uploading');
           }
-          await _uploadCurrentBatch(userId);
+          _requestUpload(userId);
         }
       },
       onError: (e) {
@@ -420,7 +436,7 @@ final class PointAutomationService {
             _lastPointTime = DateTime.now();
             _supervisor?.onPoint();
             // Envoi immédiat, sans dépendre du flux réactif de la base.
-            unawaited(_uploadCurrentBatch(userId));
+            _requestUpload(userId);
             unawaited(TrackingLog.addThrottled('point', 'Point enregistré', every: const Duration(minutes: 10)));
           } else if (storeResult case Err(value: final err)) {
             debugPrint("[PointAutomation] Failed to store point: $err");

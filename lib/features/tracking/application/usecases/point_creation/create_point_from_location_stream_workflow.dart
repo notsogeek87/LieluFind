@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:dawarich/core/domain/models/point/local/local_point.dart';
 import 'package:dawarich/features/tracking/application/repositories/location_provider_interface.dart';
+import 'package:dawarich/features/tracking/application/services/adaptive_tracking_policy.dart';
 import 'package:dawarich/features/tracking/application/services/tracking_supervisor.dart';
 import 'package:dawarich/features/tracking/application/usecases/point_creation/create_point_usecase.dart';
 import 'package:dawarich/features/tracking/application/usecases/settings/get_tracker_settings_usecase.dart';
@@ -29,6 +30,9 @@ final class CreatePointFromLocationStreamWorkflow {
 
   /// Timer mode: the location stream only reports after this much movement.
   static const int _streamDistanceMeters = 10;
+
+  /// Immobile : cadence de calcul demandée au fournisseur (au lieu de 10 s).
+  static const Duration _stillProviderInterval = Duration(seconds: 60);
 
   CreatePointFromLocationStreamWorkflow(
     this._getTrackerSettings,
@@ -196,7 +200,12 @@ final class CreatePointFromLocationStreamWorkflow {
     return current;
   }
 
-  /// Timer mode: emit points at fixed intervals using cached location.
+  /// Timer mode, adaptatif pour la batterie :
+  /// - **immobile** : le fournisseur ne calcule qu'une position par minute et ne
+  ///   la livre qu'après 25 m de déplacement ; un point « toujours là » toutes
+  ///   les 5 min (une seule demande de position active si besoin) ;
+  /// - **en mouvement** : cadence normale ([frequencySeconds]), retour en
+  ///   immobile après 3 min sans déplacement.
   Stream<Result<LocalPoint, String>> _getTimerPointStream(
     int userId,
     LocationPrecision precision,
@@ -204,36 +213,88 @@ final class CreatePointFromLocationStreamWorkflow {
     TrackingHealthSink? health,
   ) async* {
     LocationFix? latestFix;
-    LocationFix? lastRecordedFix;
-    DateTime? lastRecordedAt;
     StreamSubscription<LocationFix>? locationSub;
+    Timer? timer;
 
-    // Battery: the stream only wakes the GPS/network provider when the phone
-    // moved _streamDistanceMeters, and at most once per tracking interval.
-    // A still phone therefore costs (almost) nothing between heartbeats.
-    final request = LocationRequest(
-      precision: precision,
-      distanceFilterMeters: _streamDistanceMeters,
-      timeLimit: null,
-      intervalDuration: Duration(seconds: frequencySeconds),
+    final policy = AdaptiveTrackingPolicy(
+      distance: (a, b) => Geolocator.distanceBetween(a.latitude, a.longitude, b.latitude, b.longitude),
+      stillRadiusMeters: _stillRadiusMeters,
+      stillHeartbeat: _stillHeartbeat,
+      movingInterval: Duration(seconds: frequencySeconds),
     );
+
+    LocationRequest requestFor(MotionMode mode) => switch (mode) {
+          MotionMode.still => LocationRequest(
+              precision: precision,
+              distanceFilterMeters: _stillRadiusMeters.round(),
+              timeLimit: null,
+              intervalDuration: _stillProviderInterval,
+            ),
+          MotionMode.moving => LocationRequest(
+              precision: precision,
+              distanceFilterMeters: _streamDistanceMeters,
+              timeLimit: null,
+              intervalDuration: Duration(seconds: frequencySeconds),
+            ),
+        };
+
     final fixRequest = LocationRequest(
       precision: precision,
       distanceFilterMeters: 0,
       timeLimit: null,
       intervalDuration: Duration(seconds: frequencySeconds),
     );
-    Timer? timer;
 
-    try {
-      final locationStream = _locationProvider.getLocationStream(request);
-      locationSub = locationStream.listen(
+    final controller = StreamController<Result<LocalPoint, String>>();
+    bool busy = false;
+
+    Future<void> record(LocationFix fix) async {
+      try {
+        final timestamp = DateTime.now().toUtc();
+        final pointResult =
+            await _createPointFromLocationFix(fix, timestamp, userId).timeout(_createPointTimeout);
+        if (pointResult case Ok(value: final point)) {
+          policy.recorded(fix, DateTime.now());
+          if (!controller.isClosed) controller.add(Ok(point));
+        } else if (pointResult case Err(value: final err)) {
+          if (!controller.isClosed) controller.add(Err('Failed to create point: $err'));
+        }
+      } catch (e) {
+        if (!controller.isClosed) controller.add(Err('Failed to create point: $e'));
+      }
+    }
+
+    late void Function(MotionMode mode) subscribe;
+
+    Future<void> apply(TrackingDecision decision, LocationFix? fix) async {
+      final to = decision.switchTo;
+      if (to != null && to != policy.mode) {
+        policy.switched(to, DateTime.now());
+        subscribe(to);
+        if (kDebugMode) debugPrint('[LocationStream] Mode → ${to.name}');
+      }
+      if (decision.record && fix != null) await record(fix);
+    }
+
+    // Les événements (positions, ticks) sont traités un par un : jamais deux
+    // créations de point ni deux demandes de position active en parallèle.
+    Future<void> serialized(Future<void> Function() job) async {
+      if (busy) return;
+      busy = true;
+      try {
+        await job();
+      } finally {
+        busy = false;
+      }
+    }
+
+    subscribe = (MotionMode mode) {
+      final old = locationSub;
+      locationSub = _locationProvider.getLocationStream(requestFor(mode)).listen(
         (fix) {
           latestFix = fix;
           health?.onFix();
-          if (kDebugMode) {
-            debugPrint('[LocationStream] Cache updated: ${fix.latitude}, ${fix.longitude}');
-          }
+          unawaited(serialized(() => apply(policy.onFix(fix, DateTime.now()), fix)));
         },
         onError: (e) {
           health?.onStreamError(e);
@@ -243,131 +304,65 @@ final class CreatePointFromLocationStreamWorkflow {
         },
         onDone: () => health?.onStreamDone(),
       );
+      if (old != null) unawaited(old.cancel());
+    };
 
-      final controller = StreamController<Result<LocalPoint, String>>();
-      // Stop the timer and the location stream as soon as the consumer goes
-      // away (stop / settings restart); otherwise they keep running forever.
-      controller.onCancel = () async {
-        timer?.cancel();
-        await locationSub?.cancel();
-      };
+    // Stop the timer and the location stream as soon as the consumer goes
+    // away (stop / settings restart); otherwise they keep running forever.
+    controller.onCancel = () async {
+      timer?.cancel();
+      await locationSub?.cancel();
+    };
+
+    try {
+      subscribe(policy.mode);
 
       final initialResult = await _fixNow(fixRequest);
       if (initialResult case Ok(value: final fix)) {
         latestFix = fix;
         health?.onFix();
-        final timestamp = DateTime.now().toUtc();
-        final pointResult = await _createPointFromLocationFix(fix, timestamp, userId)
-            .timeout(_createPointTimeout);
-        if (pointResult case Ok(value: final point)) {
-          lastRecordedFix = fix;
-          lastRecordedAt = DateTime.now();
-          yield Ok(point);
-        }
+        await record(fix);
       }
-
-      final timerDuration = Duration(seconds: frequencySeconds);
-      bool tickBusy = false;
 
       if (kDebugMode) {
-        debugPrint('[LocationStream] Timer mode: interval = ${frequencySeconds}s');
+        debugPrint('[LocationStream] Adaptive mode: moving interval = ${frequencySeconds}s');
       }
 
-      Future<void> onTick() async {
-        LocationFix? fixToUse = latestFix;
-
-        // The distance-filtered stream stays silent while the phone is still,
-        // so an unchanged cache + a recent point means "still here": skip
-        // without waking the GPS.
-        final recordedFix = lastRecordedFix;
-        final recordedAt = lastRecordedAt;
-        if (fixToUse != null &&
-            identical(fixToUse, recordedFix) &&
-            recordedAt != null &&
-            DateTime.now().difference(recordedAt) < _stillHeartbeat) {
-          return;
-        }
-
-        if (fixToUse == null ||
-            DateTime.now().difference(fixToUse.timestampUtc).inSeconds > 30) {
-          if (kDebugMode) {
-            debugPrint('[LocationStream] Cache stale, fetching current position');
-          }
-          final currentResult = await _fixNow(fixRequest);
-          if (currentResult case Ok(value: final fix)) {
-            fixToUse = fix;
-            latestFix = fix;
-            health?.onFix();
-          }
-        }
-
-        if (fixToUse == null) {
-          controller.add(Err('No location available'));
-          return;
-        }
-
-        // Still and recently recorded: skip, the family map is already right.
-        final lastFix = lastRecordedFix;
-        final lastAt = lastRecordedAt;
-        if (lastFix != null && lastAt != null) {
-          final moved = Geolocator.distanceBetween(lastFix.latitude,
-              lastFix.longitude, fixToUse.latitude, fixToUse.longitude);
-          if (moved < _stillRadiusMeters &&
-              DateTime.now().difference(lastAt) < _stillHeartbeat) {
-            return;
-          }
-        }
-
-        try {
-          final timestamp = DateTime.now().toUtc();
-          final pointResult = await _createPointFromLocationFix(fixToUse, timestamp, userId)
-              .timeout(_createPointTimeout);
-
-          if (pointResult case Ok(value: final point)) {
-            lastRecordedFix = fixToUse;
-            lastRecordedAt = DateTime.now();
-            controller.add(Ok(point));
-          } else if (pointResult case Err(value: final err)) {
-            if (kDebugMode) {
-              debugPrint('[LocationStream] Point validation failed: $err');
-            }
-            controller.add(Err('Failed to create point: $err'));
-          }
-        } catch (e) {
-          if (kDebugMode) {
-            debugPrint('[LocationStream] Error creating point: $e');
-          }
-          controller.add(Err('Failed to create point: $e'));
-        }
-      }
-
-      timer = Timer.periodic(timerDuration, (t) async {
+      timer = Timer.periodic(Duration(seconds: frequencySeconds), (t) {
         if (controller.isClosed) {
           t.cancel();
           return;
         }
         health?.onTick();
 
-        // Un tick à la fois : un `getCurrent` lent ne doit pas empiler les appels.
-        if (tickBusy) return;
-        tickBusy = true;
-        try {
-          await onTick();
-        } finally {
-          tickBusy = false;
-        }
+        unawaited(serialized(() async {
+          final decision = policy.onTick(latestFix, DateTime.now());
+          if (decision.needFreshFix) {
+            if (decision.switchTo != null) await apply(TrackingDecision(switchTo: decision.switchTo), null);
+            final current = await _fixNow(fixRequest);
+            if (current case Ok(value: final fix)) {
+              latestFix = fix;
+              health?.onFix();
+              await apply(policy.onFreshFix(fix, DateTime.now()), fix);
+            } else if (current case Err(value: final err)) {
+              if (!controller.isClosed) controller.add(Err('No location available: $err'));
+            }
+            return;
+          }
+          await apply(decision, latestFix);
+        }));
       });
 
       await for (final result in controller.stream) {
         yield result;
       }
-
-      await locationSub.cancel();
     } catch (e, s) {
       if (kDebugMode) {
         debugPrint('[LocationStream] Timer error: $e\n$s');
       }
       yield Err('Location stream error: $e');
+    } finally {
+      timer?.cancel();
       await locationSub?.cancel();
     }
   }
