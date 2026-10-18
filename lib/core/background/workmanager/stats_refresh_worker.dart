@@ -56,7 +56,9 @@ Future<void> initializeAndRegisterStatsWorker() async {
 
 /// Registers the periodic batch upload task.
 ///
-/// This task runs every 15 minutes (Android WorkManager minimum) and handles:
+/// Filet de sécurité : le service de suivi envoie déjà ses points lui-même. Chaque
+/// exécution démarre un moteur Flutter complet, d'où une fois par heure seulement.
+/// Handles:
 ///  - Threshold-based uploads (batch is full)
 ///  - Expiration-based uploads (batch has been sitting too long)
 ///
@@ -68,15 +70,16 @@ Future<void> registerBatchUploadWorker() async {
   await Workmanager().registerPeriodicTask(
     kBatchUploadTask,
     kBatchUploadTask,
-    frequency: const Duration(minutes: 15),
+    frequency: const Duration(hours: 1),
     constraints: Constraints(
       networkType: NetworkType.connected,
     ),
-    existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
+    // update : remplace la tâche déjà planifiée à 15 min sur les téléphones existants.
+    existingWorkPolicy: ExistingPeriodicWorkPolicy.update,
   );
 
   if (kDebugMode) {
-    debugPrint('[WorkManager] Batch upload task registered (15min)');
+    debugPrint('[WorkManager] Batch upload task registered (1h)');
   }
 }
 

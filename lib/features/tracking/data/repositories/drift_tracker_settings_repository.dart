@@ -27,7 +27,7 @@ final class DriftTrackerSettingsRepository implements ITrackerSettingsRepository
     final TrackerSettings defaults = TrackerSettings(
       userId: userId,
       automaticTracking: false,
-      trackingFrequency: 10,
+      trackingFrequency: 20,
       locationPrecision: LocationPrecision.balanced,
       minimumPointDistance: 0,
       pointsPerBatch: 1,
@@ -67,7 +67,7 @@ final class DriftTrackerSettingsRepository implements ITrackerSettingsRepository
     final TrackerSettings defaults = TrackerSettings(
       userId: userId,
       automaticTracking: false,
-      trackingFrequency: 10,
+      trackingFrequency: 20,
       locationPrecision: LocationPrecision.balanced,
       minimumPointDistance: 0,
       pointsPerBatch: 1,
@@ -103,8 +103,8 @@ final class DriftTrackerSettingsRepository implements ITrackerSettingsRepository
         .getSingleOrNull();
   }
 
-  /// Tracking cadence is fixed so the family map is always fresh: a point
-  /// every 10 s, no distance filter, each point uploaded right away. Values
+  /// Tracking cadence is fixed: a point every 20 s while moving (the tracking
+  /// workflow slows down on its own when the phone is still). Values
   /// saved by older versions are ignored.
   TrackerSettings _fromRow(TrackerSettingsTableData r, {required TrackerSettings defaults}) => TrackerSettings(
     userId: r.userId,

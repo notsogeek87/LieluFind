@@ -31,8 +31,8 @@ final class CreatePointFromLocationStreamWorkflow {
   /// Timer mode: the location stream only reports after this much movement.
   static const int _streamDistanceMeters = 10;
 
-  /// Immobile : cadence de calcul demandée au fournisseur (au lieu de 10 s).
-  static const Duration _stillProviderInterval = Duration(seconds: 60);
+  /// Immobile : cadence de calcul demandée au fournisseur.
+  static const Duration _stillProviderInterval = Duration(minutes: 2);
 
   CreatePointFromLocationStreamWorkflow(
     this._getTrackerSettings,
