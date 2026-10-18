@@ -32,7 +32,7 @@ final class CreatePointFromLocationStreamWorkflow {
   static const int _streamDistanceMeters = 10;
 
   /// Immobile : cadence de calcul demandée au fournisseur.
-  static const Duration _stillProviderInterval = Duration(minutes: 2);
+  static const Duration _stillProviderInterval = _stillHeartbeat;
 
   CreatePointFromLocationStreamWorkflow(
     this._getTrackerSettings,
@@ -201,9 +201,9 @@ final class CreatePointFromLocationStreamWorkflow {
   }
 
   /// Timer mode, adaptatif pour la batterie :
-  /// - **immobile** : le fournisseur ne calcule qu'une position par minute et ne
-  ///   la livre qu'après 25 m de déplacement ; un point « toujours là » toutes
-  ///   les 5 min (une seule demande de position active si besoin) ;
+  /// - **immobile** : le fournisseur ne calcule qu'une position toutes les 5 min et
+  ///   la livre : point « toujours là » et détection de départ
+  ///   (≤ 5 min) ; demande de position active seulement si rien n'arrive ;
   /// - **en mouvement** : cadence normale ([frequencySeconds]), retour en
   ///   immobile après 3 min sans déplacement.
   Stream<Result<LocalPoint, String>> _getTimerPointStream(
@@ -226,7 +226,9 @@ final class CreatePointFromLocationStreamWorkflow {
     LocationRequest requestFor(MotionMode mode) => switch (mode) {
           MotionMode.still => LocationRequest(
               precision: precision,
-              distanceFilterMeters: _stillRadiusMeters.round(),
+              // Pas de filtre de distance : une livraison toutes les 5 min sert de
+              // point « toujours là » et de détection de départ, sans position active.
+              distanceFilterMeters: 0,
               timeLimit: null,
               intervalDuration: _stillProviderInterval,
             ),

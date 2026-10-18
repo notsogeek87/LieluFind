@@ -36,6 +36,8 @@ final class AdaptiveTrackingPolicy {
     this.movingInterval = const Duration(seconds: 10),
     this.maxFixAge = const Duration(seconds: 60),
     this.freshFixRetry = const Duration(seconds: 60),
+    this.deliverySlack = const Duration(seconds: 30),
+    this.stillFallbackGrace = const Duration(seconds: 90),
   });
 
   /// Distance en mètres entre deux positions.
@@ -59,6 +61,14 @@ final class AdaptiveTrackingPolicy {
   /// Délai minimal entre deux demandes de position active.
   final Duration freshFixRetry;
 
+  /// Immobile : le fournisseur livre une position toutes les [stillHeartbeat] ;
+  /// une livraison un peu en avance compte quand même comme point dû.
+  final Duration deliverySlack;
+
+  /// Immobile : si le fournisseur n'a rien livré [stillHeartbeat] + ce délai après
+  /// le dernier point, on demande une position active (secours).
+  final Duration stillFallbackGrace;
+
   MotionMode mode = MotionMode.still;
   LocationFix? _lastRecordedFix;
   DateTime? _lastRecordedAt;
@@ -76,7 +86,12 @@ final class AdaptiveTrackingPolicy {
 
     switch (mode) {
       case MotionMode.still:
-        if (!moved) return TrackingDecision.none;
+        if (!moved) {
+          // Livraison périodique du fournisseur : c'est le point « toujours là ».
+          final lastAt = _lastRecordedAt;
+          final due = lastAt == null || now.difference(lastAt) >= stillHeartbeat - deliverySlack;
+          return TrackingDecision(record: due);
+        }
         _lastMoveAt = now;
         return const TrackingDecision(record: true, switchTo: MotionMode.moving);
       case MotionMode.moving:
@@ -98,7 +113,11 @@ final class AdaptiveTrackingPolicy {
     }
 
     final lastAt = _lastRecordedAt;
-    final period = mode == MotionMode.moving && switchTo == null ? stillAfter : stillHeartbeat;
+    // Immobile : le point dû arrive normalement par le fournisseur ; le minuteur
+    // n'est qu'un secours s'il n'a rien livré.
+    final period = mode == MotionMode.moving && switchTo == null
+        ? stillAfter
+        : stillHeartbeat + stillFallbackGrace;
     final due = lastAt == null || now.difference(lastAt) >= period;
     if (!due) return TrackingDecision(switchTo: switchTo);
 
