@@ -140,6 +140,20 @@ final class PointAutomationService {
     });
   }
 
+  /// Niveau de batterie une fois par heure dans le journal, pour mesurer la
+  /// consommation réelle (lu sur le point, donc sans coût supplémentaire).
+  void _logBatteryHourly(dynamic point) {
+    try {
+      final props = point.properties;
+      final level = (props.batteryLevel as num).toDouble();
+      final percent = (level <= 1 ? level * 100 : level).round();
+      unawaited(TrackingLog.addThrottled(
+          'battery-level',
+          'Batterie $percent % (${props.batteryState})',
+          every: const Duration(hours: 1)));
+    } catch (_) {}
+  }
+
   /// Envoie maintenant si le dernier envoi date d'au moins [_minUploadSpacing] ;
   /// sinon le watchdog s'en charge au tick suivant (30 s).
   void _requestUpload(int userId) {
@@ -435,6 +449,7 @@ final class PointAutomationService {
           if (storeResult case Ok()) {
             _lastPointTime = DateTime.now();
             _supervisor?.onPoint();
+            _logBatteryHourly(point);
             // Envoi immédiat, sans dépendre du flux réactif de la base.
             _requestUpload(userId);
             unawaited(TrackingLog.addThrottled('point', 'Point enregistré', every: const Duration(minutes: 10)));

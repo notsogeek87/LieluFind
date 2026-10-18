@@ -77,8 +77,26 @@ final familyLocationsProvider =
     return [...primary, ...extra.where((m) => seen.add(m.userId))];
   }
 
+  // Ne jamais interroger le serveur quand la carte n'est pas à l'écran : le
+  // service de suivi garde le processus vivant (et le CPU éveillé), donc une
+  // simple boucle tournerait jour et nuit dès que l'app reste en arrière-plan.
+  var resumed = Completer<void>();
+  final lifecycle = AppLifecycleListener(onResume: () {
+    if (!resumed.isCompleted) resumed.complete();
+  });
+  ref.onDispose(lifecycle.dispose);
+  bool inForeground() =>
+      WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+
   yield await fetchAll();
-  await for (final _ in Stream<void>.periodic(_refreshInterval)) {
+  while (true) {
+    if (inForeground()) {
+      await Future<void>.delayed(_refreshInterval);
+    } else {
+      await resumed.future; // en pause jusqu'au retour à l'écran
+      resumed = Completer<void>();
+    }
+    if (!inForeground()) continue;
     yield await fetchAll();
   }
 });
