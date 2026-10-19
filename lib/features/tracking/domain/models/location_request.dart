@@ -17,11 +17,16 @@ final class LocationRequest {
   /// Null = OS decides (can be very inconsistent).
   final Duration? intervalDuration;
 
+  /// Écoute passive : aucune position n'est calculée pour nous, on reçoit
+  /// seulement celles que le téléphone calcule déjà (coût nul).
+  final bool passive;
+
   const LocationRequest({
     required this.precision,
     this.distanceFilterMeters,
     this.timeLimit,
     this.intervalDuration,
+    this.passive = false,
   });
 
   LocationRequest copyWith({
@@ -29,12 +34,14 @@ final class LocationRequest {
     int? distanceFilterMeters,
     Duration? timeLimit,
     Duration? intervalDuration,
+    bool? passive,
   }) {
     return LocationRequest(
       precision: precision ?? this.precision,
       distanceFilterMeters: distanceFilterMeters ?? this.distanceFilterMeters,
       timeLimit: timeLimit ?? this.timeLimit,
       intervalDuration: intervalDuration ?? this.intervalDuration,
+      passive: passive ?? this.passive,
     );
   }
 }

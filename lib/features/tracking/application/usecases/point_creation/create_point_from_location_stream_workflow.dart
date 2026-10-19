@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:dawarich/core/domain/models/point/local/local_point.dart';
 import 'package:dawarich/features/tracking/application/repositories/location_provider_interface.dart';
 import 'package:dawarich/features/tracking/application/services/adaptive_tracking_policy.dart';
+import 'package:dawarich/features/tracking/application/services/tracking_log.dart';
 import 'package:dawarich/features/tracking/application/services/tracking_supervisor.dart';
 import 'package:dawarich/features/tracking/application/usecases/point_creation/create_point_usecase.dart';
 import 'package:dawarich/features/tracking/application/usecases/settings/get_tracker_settings_usecase.dart';
@@ -26,13 +27,17 @@ final class CreatePointFromLocationStreamWorkflow {
   static const double _stillRadiusMeters = 25;
 
   /// Timer mode: while still, only one "I'm still here" point per this delay.
-  static const Duration _stillHeartbeat = Duration(minutes: 5);
+  static const Duration _stillHeartbeat = Duration(minutes: 15);
+
+  /// Immobile : vérification gratuite (dernière position connue) pour détecter un départ.
+  static const Duration _stillProbeInterval = Duration(minutes: 5);
+
+  /// Une dernière position connue plus récente que ça vaut une position active.
+  static const Duration _cheapFixMaxAge = Duration(minutes: 5);
 
   /// Timer mode: the location stream only reports after this much movement.
   static const int _streamDistanceMeters = 10;
 
-  /// Immobile : cadence de calcul demandée au fournisseur.
-  static const Duration _stillProviderInterval = _stillHeartbeat;
 
   CreatePointFromLocationStreamWorkflow(
     this._getTrackerSettings,
@@ -201,9 +206,10 @@ final class CreatePointFromLocationStreamWorkflow {
   }
 
   /// Timer mode, adaptatif pour la batterie :
-  /// - **immobile** : le fournisseur ne calcule qu'une position toutes les 5 min et
-  ///   la livre : point « toujours là » et détection de départ
-  ///   (≤ 5 min) ; demande de position active seulement si rien n'arrive ;
+  /// - **immobile** : aucune position calculée pour nous en continu ;
+  ///   écoute passive ; départ détecté par la dernière position connue toutes
+  ///   les 5 min ; un point « toujours là » toutes les 15 min (position active
+  ///   seulement si le téléphone n'en a pas de récente) ;
   /// - **en mouvement** : cadence normale ([frequencySeconds]), retour en
   ///   immobile après 3 min sans déplacement.
   Stream<Result<LocalPoint, String>> _getTimerPointStream(
@@ -220,17 +226,34 @@ final class CreatePointFromLocationStreamWorkflow {
       distance: (a, b) => Geolocator.distanceBetween(a.latitude, a.longitude, b.latitude, b.longitude),
       stillRadiusMeters: _stillRadiusMeters,
       stillHeartbeat: _stillHeartbeat,
+      // Le flux passif ne livre rien de régulier : le minuteur prend le relais pile à l'heure.
+      stillFallbackGrace: Duration.zero,
       movingInterval: Duration(seconds: frequencySeconds),
     );
+
+    // Journal horaire : d'où viennent les positions à l'arrêt (pour mesurer le gain).
+    var cheapFixes = 0, activeFixes = 0;
+    var statsSince = DateTime.now();
+    DateTime? lastProbeAt;
+
+    /// Dernière position connue du téléphone si elle est récente : coût nul.
+    Future<LocationFix?> cheapFix() async {
+      final last = await _locationProvider.getLastKnown();
+      if (last case Some(value: final fix)) {
+        if (DateTime.now().toUtc().difference(fix.timestampUtc) <= _cheapFixMaxAge) return fix;
+      }
+      return null;
+    }
 
     LocationRequest requestFor(MotionMode mode) => switch (mode) {
           MotionMode.still => LocationRequest(
               precision: precision,
-              // Pas de filtre de distance : une livraison toutes les 5 min sert de
-              // point « toujours là » et de détection de départ, sans position active.
+              // Passif : on profite des positions que le téléphone calcule déjà,
+              // sans en demander. Le point « toujours là » vient du minuteur.
               distanceFilterMeters: 0,
               timeLimit: null,
-              intervalDuration: _stillProviderInterval,
+              intervalDuration: _stillHeartbeat,
+              passive: true,
             ),
           MotionMode.moving => LocationRequest(
               precision: precision,
@@ -338,10 +361,36 @@ final class CreatePointFromLocationStreamWorkflow {
         health?.onTick();
 
         unawaited(serialized(() async {
+          final now = DateTime.now();
+          if (now.difference(statsSince) >= const Duration(hours: 1)) {
+            unawaited(TrackingLog.add('Positions (1 h) : $cheapFixes en cache, $activeFixes actives, mode ${policy.mode.name}'));
+            cheapFixes = 0;
+            activeFixes = 0;
+            statsSince = now;
+          }
+
+          // Immobile : détection de départ par la dernière position connue (gratuite).
+          final probeAt = lastProbeAt;
+          if (policy.mode == MotionMode.still &&
+              (probeAt == null || now.difference(probeAt) >= _stillProbeInterval)) {
+            lastProbeAt = now;
+            final probe = await cheapFix();
+            final latest = latestFix;
+            if (probe != null && (latest == null || probe.timestampUtc.isAfter(latest.timestampUtc))) {
+              latestFix = probe;
+              health?.onFix();
+              cheapFixes++;
+              await apply(policy.onFix(probe, DateTime.now()), probe);
+            }
+          }
+
           final decision = policy.onTick(latestFix, DateTime.now());
           if (decision.needFreshFix) {
             if (decision.switchTo != null) await apply(TrackingDecision(switchTo: decision.switchTo), null);
-            final current = await _fixNow(fixRequest);
+            final cached = await cheapFix();
+            if (cached != null) cheapFixes++;
+            final current = cached != null ? Ok<LocationFix, String>(cached) : await _fixNow(fixRequest);
+            if (cached == null && current is Ok) activeFixes++;
             if (current case Ok(value: final fix)) {
               latestFix = fix;
               health?.onFix();

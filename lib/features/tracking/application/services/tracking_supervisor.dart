@@ -51,7 +51,7 @@ final class TrackingSupervisor implements TrackingHealthSink {
     required this.log,
     this.now = DateTime.now,
     this.tickInterval = const Duration(seconds: 10),
-    this.maxPointGap = const Duration(minutes: 12),
+    this.maxPointGap = const Duration(minutes: 22),
     this.startupGrace = const Duration(seconds: 90),
     this.stableAfter = const Duration(minutes: 2),
   });
@@ -72,7 +72,7 @@ final class TrackingSupervisor implements TrackingHealthSink {
   final Duration tickInterval;
 
   /// Silence maximal tolérable sans point : le rythme « immobile » est un point
-  /// toutes les 5 min, plus le temps d'un `getCurrent` raté.
+  /// toutes les 15 min, plus le temps d'une position active ratée.
   final Duration maxPointGap;
 
   /// Délai laissé à un flux fraîchement (ré)abonné pour produire un premier signe de vie.

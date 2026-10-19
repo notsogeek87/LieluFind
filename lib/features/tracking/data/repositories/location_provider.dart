@@ -70,7 +70,8 @@ final class LocationProvider implements ILocationProvider {
                 setOngoing: true,
               )
             : null,
-        accuracy: _toGeolocatorAccuracy(request.precision),
+        // `lowest` = fournisseur passif côté Android : zéro calcul de position.
+        accuracy: request.passive ? LocationAccuracy.lowest : _toGeolocatorAccuracy(request.precision),
         distanceFilter: request.distanceFilterMeters ?? 0,
         timeLimit: request.timeLimit,
         intervalDuration: request.intervalDuration ?? const Duration(seconds: 10),

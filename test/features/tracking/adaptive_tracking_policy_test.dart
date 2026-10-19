@@ -125,4 +125,33 @@ void main() {
       expect(d.switchTo, MotionMode.moving);
     });
   });
+
+  group('point toutes les 15 min (réglage utilisé par l\'app)', () {
+    test('sans livraison du fournisseur, le minuteur demande le point pile à 15 min', () {
+      p = AdaptiveTrackingPolicy(
+        distance: (a, b) => (a.latitude - b.latitude).abs(),
+        stillHeartbeat: const Duration(minutes: 15),
+        stillFallbackGrace: Duration.zero,
+      );
+      start();
+      at(const Duration(minutes: 14, seconds: 50));
+      final early = p.onTick(fixAt(0, t.subtract(const Duration(minutes: 10))), t);
+      expect(early.record || early.needFreshFix, isFalse);
+      at(const Duration(seconds: 10));
+      expect(p.onTick(fixAt(0, t.subtract(const Duration(minutes: 10))), t).needFreshFix, isTrue);
+    });
+
+    test('une position gratuite qui montre un départ passe en mouvement sans attendre 15 min', () {
+      p = AdaptiveTrackingPolicy(
+        distance: (a, b) => (a.latitude - b.latitude).abs(),
+        stillHeartbeat: const Duration(minutes: 15),
+        stillFallbackGrace: Duration.zero,
+      );
+      start();
+      at(const Duration(minutes: 5));
+      final d = p.onFix(fixAt(200, t), t);
+      expect(d.record, isTrue);
+      expect(d.switchTo, MotionMode.moving);
+    });
+  });
 }
