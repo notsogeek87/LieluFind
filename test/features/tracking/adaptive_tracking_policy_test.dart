@@ -3,11 +3,11 @@ import 'package:dawarich/features/tracking/domain/models/location_fix.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// Positions sur une ligne : `x` en mètres depuis l'origine.
-LocationFix fixAt(double x, DateTime t) => LocationFix(
+LocationFix fixAt(double x, DateTime t, {double accuracy = 10}) => LocationFix(
       latitude: x,
       longitude: 0,
       timestampUtc: t,
-      hAccuracyMeters: 10,
+      hAccuracyMeters: accuracy,
       altitudeMeters: 0,
       altitudeAccuracyMeters: 0,
       speedMps: 0,
@@ -199,6 +199,35 @@ void main() {
       at(const Duration(minutes: 1));
       final next = p.onTick(stale, t);
       expect(next.needFreshFix || next.record, isFalse);
+    });
+  });
+
+  group('seuil de déplacement adaptatif (gigue de la position réseau)', () {
+    test('un saut de 60 m avec 50 m d\'incertitude de chaque côté n\'est pas un départ', () {
+      final f0 = fixAt(0, t, accuracy: 50);
+      p.onFix(f0, t);
+      p.recorded(f0, t);
+      at(const Duration(minutes: 1));
+      final d = p.onFix(fixAt(60, t, accuracy: 50), t);
+      expect(d.switchTo, isNull);
+      expect(d.record, isFalse);
+    });
+
+    test('un saut de 60 m avec une bonne précision est un départ', () {
+      final f0 = fixAt(0, t, accuracy: 5);
+      p.onFix(f0, t);
+      p.recorded(f0, t);
+      at(const Duration(minutes: 1));
+      expect(p.onFix(fixAt(60, t, accuracy: 5), t).switchTo, MotionMode.moving);
+    });
+
+    test('le seuil est plafonné à 150 m même avec une très mauvaise précision', () {
+      final f0 = fixAt(0, t, accuracy: 1000);
+      p.onFix(f0, t);
+      p.recorded(f0, t);
+      at(const Duration(minutes: 1));
+      expect(p.onFix(fixAt(120, t, accuracy: 1000), t).switchTo, isNull);
+      expect(p.onFix(fixAt(200, t, accuracy: 1000), t).switchTo, MotionMode.moving);
     });
   });
 }

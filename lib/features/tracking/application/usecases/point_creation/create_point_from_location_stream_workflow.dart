@@ -232,7 +232,7 @@ final class CreatePointFromLocationStreamWorkflow {
     );
 
     // Journal horaire : d'où viennent les positions à l'arrêt (pour mesurer le gain).
-    var cheapFixes = 0, activeFixes = 0;
+    var cheapFixes = 0, activeFixes = 0, passiveFixes = 0, modeSwitches = 0;
     var statsSince = DateTime.now();
     DateTime? lastProbeAt;
 
@@ -295,6 +295,7 @@ final class CreatePointFromLocationStreamWorkflow {
       final to = decision.switchTo;
       if (to != null && to != policy.mode) {
         policy.switched(to, DateTime.now());
+        modeSwitches++;
         subscribe(to);
         if (kDebugMode) debugPrint('[LocationStream] Mode → ${to.name}');
       }
@@ -318,6 +319,7 @@ final class CreatePointFromLocationStreamWorkflow {
       locationSub = _locationProvider.getLocationStream(requestFor(mode)).listen(
         (fix) {
           latestFix = fix;
+          passiveFixes++;
           health?.onFix();
           unawaited(serialized(() => apply(policy.onFix(fix, DateTime.now()), fix)));
         },
@@ -363,9 +365,12 @@ final class CreatePointFromLocationStreamWorkflow {
         unawaited(serialized(() async {
           final now = DateTime.now();
           if (now.difference(statsSince) >= const Duration(hours: 1)) {
-            unawaited(TrackingLog.add('Positions (1 h) : $cheapFixes en cache, $activeFixes actives, mode ${policy.mode.name}'));
+            unawaited(TrackingLog.add('Positions (1 h) : $cheapFixes en cache, $activeFixes actives, $passiveFixes reçues du flux, '
+                '$modeSwitches changements de mode, mode ${policy.mode.name}'));
             cheapFixes = 0;
             activeFixes = 0;
+            passiveFixes = 0;
+            modeSwitches = 0;
             statsSince = now;
           }
 

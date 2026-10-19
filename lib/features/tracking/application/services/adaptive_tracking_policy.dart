@@ -39,6 +39,7 @@ final class AdaptiveTrackingPolicy {
     this.deliverySlack = const Duration(seconds: 30),
     this.stillFallbackGrace = const Duration(seconds: 90),
     this.maxHeartbeatsWithoutFix = 3,
+    this.maxMovementThresholdMeters = 150,
   });
 
   /// Distance en mètres entre deux positions.
@@ -75,6 +76,18 @@ final class AdaptiveTrackingPolicy {
   /// veille profonde). Au-delà, on s'arrête plutôt que d'afficher une position périmée.
   final int maxHeartbeatsWithoutFix;
 
+  /// Plafond du seuil de déplacement adaptatif (voir [_moved]).
+  final double maxMovementThresholdMeters;
+
+  /// Un écart n'est un déplacement que s'il dépasse l'incertitude des deux positions
+  /// (la position réseau saute de plusieurs dizaines de mètres sans que l'on bouge).
+  /// Seuil : au moins [stillRadiusMeters], au plus [maxMovementThresholdMeters].
+  bool _moved(LocationFix a, LocationFix b) {
+    final uncertainty = a.hAccuracyMeters + b.hAccuracyMeters;
+    final threshold = uncertainty.clamp(stillRadiusMeters, maxMovementThresholdMeters).toDouble();
+    return distance(a, b) >= threshold;
+  }
+
   MotionMode mode = MotionMode.still;
   LocationFix? _lastRecordedFix;
   DateTime? _lastRecordedAt;
@@ -91,7 +104,7 @@ final class AdaptiveTrackingPolicy {
     final last = _lastRecordedFix;
     if (last == null) return const TrackingDecision(record: true);
 
-    final moved = distance(last, fix) >= stillRadiusMeters;
+    final moved = _moved(last, fix);
 
     switch (mode) {
       case MotionMode.still:
@@ -145,7 +158,7 @@ final class AdaptiveTrackingPolicy {
   /// Position obtenue après [TrackingDecision.needFreshFix] : c'est un point dû.
   TrackingDecision onFreshFix(LocationFix fix, DateTime now) {
     final last = _lastRecordedFix;
-    if (mode == MotionMode.still && last != null && distance(last, fix) >= stillRadiusMeters) {
+    if (mode == MotionMode.still && last != null && _moved(last, fix)) {
       _lastMoveAt = now;
       return const TrackingDecision(record: true, switchTo: MotionMode.moving);
     }
