@@ -339,6 +339,9 @@ final class BackgroundTrackingService {
 
   static Future<void> _restore(ProviderContainer container, int userId) async {
     try {
+      // Sans configure(), l'interface ne reçoit aucun message du service (pong, confirmations) :
+      // le contrôle de santé resterait toujours sans réponse.
+      await installConfigurationOnce();
       final restorer = TrackingServiceRestorer(
         readAutomaticTracking: () async {
           final getSettings = await container.read(getTrackerSettingsUseCaseProvider.future);
@@ -358,7 +361,6 @@ final class BackgroundTrackingService {
           final result = await start();
           return switch (result) { Ok() => null, Err(value: final m) => m };
         },
-        stopService: stop,
         pingHealth: _pingHealth,
         restartTracking: restartTracking,
         log: (m) => unawaited(TrackingLog.add(m)),

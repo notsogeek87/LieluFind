@@ -10,8 +10,9 @@ enum RestoreOutcome {
   /// Relance refusée (permission, GPS…). Le réglage reste activé.
   startFailed,
 
-  /// Service présent mais isolate de fond muet : arrêté puis relancé.
-  restartedUnresponsive,
+  /// Service présent mais sans réponse au contrôle de santé : on n'y touche pas (un service
+  /// qui enregistre des points est sain ; l'arrêter ferait perdre du suivi).
+  unresponsive,
 
   /// Service vivant mais suivi en panne : relance du suivi demandée.
   restartedTracking,
@@ -30,11 +31,9 @@ final class TrackingServiceRestorer {
     required this.readAutomaticTracking,
     required this.isRunning,
     required this.startService,
-    required this.stopService,
     required this.pingHealth,
     required this.restartTracking,
     required this.log,
-    this.settleDelay = const Duration(seconds: 1),
   });
 
   final Future<bool> Function() readAutomaticTracking;
@@ -42,13 +41,11 @@ final class TrackingServiceRestorer {
 
   /// `null` si démarré, sinon le message d'échec.
   final Future<String?> Function() startService;
-  final Future<void> Function() stopService;
 
   /// Instantané de santé du service de fond, ou `null` s'il ne répond pas.
   final Future<Map<String, Object?>?> Function() pingHealth;
   final Future<void> Function() restartTracking;
   final void Function(String message) log;
-  final Duration settleDelay;
 
   Future<RestoreOutcome> restore() async {
     if (!await readAutomaticTracking()) return RestoreOutcome.disabled;
@@ -65,15 +62,11 @@ final class TrackingServiceRestorer {
 
     final health = await pingHealth();
     if (health == null) {
-      log('Service présent mais sans réponse : arrêt puis relance');
-      await stopService();
-      await Future<void>.delayed(settleDelay);
-      final failure = await startService();
-      if (failure != null) {
-        log('Relance après blocage refusée : $failure (réglage conservé)');
-        return RestoreOutcome.startFailed;
-      }
-      return RestoreOutcome.restartedUnresponsive;
+      // Jamais d'arrêt sur un simple silence : le journal de terrain montre un service qui
+      // enregistrait ses points pendant que le contrôle restait sans réponse, et un arrêt
+      // suivi d'une relance interrompue (app refermée) a coûté 24 min de suivi.
+      log('Service présent, pas de réponse au contrôle de santé : laissé tel quel');
+      return RestoreOutcome.unresponsive;
     }
 
     if (health['tracking'] != true) {

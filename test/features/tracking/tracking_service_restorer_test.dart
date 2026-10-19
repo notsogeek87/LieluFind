@@ -6,7 +6,7 @@ class _Fake {
   bool running = false;
   String? startFailure;
   Map<String, Object?>? health = {'tracking': true, 'issue': null};
-  int starts = 0, stops = 0, restarts = 0;
+  int starts = 0, restarts = 0;
   final logs = <String>[];
 
   /// Le restaurateur n'a aucun accès en écriture au réglage : on vérifie
@@ -20,14 +20,9 @@ class _Fake {
       running = true;
       return null;
     },
-    stopService: () async {
-      stops++;
-      running = false;
-    },
     pingHealth: () async => health,
     restartTracking: () async => restarts++,
     log: logs.add,
-    settleDelay: Duration.zero,
   );
 }
 
@@ -52,21 +47,13 @@ void main() {
     expect(f.logs.single, contains('réglage conservé'));
   });
 
-  test('service présent mais isolate muet : arrêt puis relance', () async {
+  test('service présent mais sans réponse au contrôle : on n\'y touche pas', () async {
     final f = _Fake()
       ..running = true
       ..health = null;
-    expect(await f.restorer.restore(), RestoreOutcome.restartedUnresponsive);
-    expect(f.stops, 1);
-    expect(f.starts, 1);
-  });
-
-  test('relance refusée après blocage : le réglage reste activé', () async {
-    final f = _Fake()
-      ..running = true
-      ..health = null
-      ..startFailure = 'Notification permission is required.';
-    expect(await f.restorer.restore(), RestoreOutcome.startFailed);
+    expect(await f.restorer.restore(), RestoreOutcome.unresponsive);
+    expect(f.starts + f.restarts, 0, reason: 'ni arrêt ni relance sur un simple silence');
+    expect(f.running, isTrue);
     expect(f.automaticTracking, isTrue);
   });
 
@@ -76,7 +63,6 @@ void main() {
       ..health = {'tracking': true, 'issue': 'streamDone'};
     expect(await f.restorer.restore(), RestoreOutcome.restartedTracking);
     expect(f.restarts, 1);
-    expect(f.stops, 0, reason: 'inutile de tuer le service');
   });
 
   test('service en attente de sa session : on ne le dérange pas', () async {
@@ -84,12 +70,12 @@ void main() {
       ..running = true
       ..health = {'tracking': false, 'error': 'initialisation en cours'};
     expect(await f.restorer.restore(), RestoreOutcome.waitingForInit);
-    expect(f.starts + f.stops + f.restarts, 0);
+    expect(f.starts + f.restarts, 0);
   });
 
   test('tout va bien : aucune action', () async {
     final f = _Fake()..running = true;
     expect(await f.restorer.restore(), RestoreOutcome.healthy);
-    expect(f.starts + f.stops + f.restarts, 0);
+    expect(f.starts + f.restarts, 0);
   });
 }
