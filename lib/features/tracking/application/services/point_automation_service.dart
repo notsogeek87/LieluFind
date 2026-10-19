@@ -39,9 +39,10 @@ final class PointAutomationService {
   /// Uses the cached batch count — no DB query.
   static const _heartbeatInterval = Duration(minutes: 10);
 
-  /// Au plus un envoi par minute : en mouvement (un point toutes les 10 s), envoyer
-  /// chaque point garderait la radio 4G allumée en permanence.
-  static const _minUploadSpacing = Duration(seconds: 60);
+  /// Au plus un envoi toutes les 30 s : en mouvement (un point toutes les 20 s), envoyer
+  /// chaque point garderait la radio 4G allumée en permanence. Retard maximal sur la
+  /// carte en mouvement : environ 20 + 30 + 30 s.
+  static const _minUploadSpacing = Duration(seconds: 30);
 
   /// Au plus une mise à jour de la notification par minute.
   static const _minNotificationSpacing = Duration(seconds: 60);
