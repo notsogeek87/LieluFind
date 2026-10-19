@@ -273,13 +273,13 @@ final class CreatePointFromLocationStreamWorkflow {
     final controller = StreamController<Result<LocalPoint, String>>();
     bool busy = false;
 
-    Future<void> record(LocationFix fix) async {
+    Future<void> record(LocationFix fix, {bool withoutFix = false}) async {
       try {
         final timestamp = DateTime.now().toUtc();
         final pointResult =
             await _createPointFromLocationFix(fix, timestamp, userId).timeout(_createPointTimeout);
         if (pointResult case Ok(value: final point)) {
-          policy.recorded(fix, DateTime.now());
+          policy.recorded(fix, DateTime.now(), withoutFix: withoutFix);
           if (!controller.isClosed) controller.add(Ok(point));
         } else if (pointResult case Err(value: final err)) {
           if (!controller.isClosed) controller.add(Err('Failed to create point: $err'));
@@ -396,7 +396,17 @@ final class CreatePointFromLocationStreamWorkflow {
               health?.onFix();
               await apply(policy.onFreshFix(fix, DateTime.now()), fix);
             } else if (current case Err(value: final err)) {
-              if (!controller.isClosed) controller.add(Err('No location available: $err'));
+              // Aucune position obtenable : à l'arrêt, point « toujours là » avec la
+              // dernière position connue (pas de trou, pas de recherche à la minute).
+              final fallback = policy.lastRecordedFix;
+              if (policy.onFreshFixFailed().record && fallback != null) {
+                unawaited(TrackingLog.addThrottled('no-fix',
+                    'Position introuvable ($err) : point conservé à la dernière position (${policy.heartbeatsWithoutFix + 1}/3)',
+                    every: const Duration(minutes: 10)));
+                await record(fallback, withoutFix: true);
+              } else if (!controller.isClosed) {
+                controller.add(Err('No location available: $err'));
+              }
             }
             return;
           }

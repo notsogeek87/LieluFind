@@ -38,6 +38,7 @@ final class AdaptiveTrackingPolicy {
     this.freshFixRetry = const Duration(seconds: 60),
     this.deliverySlack = const Duration(seconds: 30),
     this.stillFallbackGrace = const Duration(seconds: 90),
+    this.maxHeartbeatsWithoutFix = 3,
   });
 
   /// Distance en mètres entre deux positions.
@@ -69,13 +70,21 @@ final class AdaptiveTrackingPolicy {
   /// le dernier point, on demande une position active (secours).
   final Duration stillFallbackGrace;
 
+  /// Immobile : nombre maximal de points « toujours là » consécutifs enregistrés avec la
+  /// dernière position connue quand aucune position n'est obtenable (téléphone posé,
+  /// veille profonde). Au-delà, on s'arrête plutôt que d'afficher une position périmée.
+  final int maxHeartbeatsWithoutFix;
+
   MotionMode mode = MotionMode.still;
   LocationFix? _lastRecordedFix;
   DateTime? _lastRecordedAt;
   DateTime? _lastMoveAt;
   DateTime? _lastFreshFixRequestAt;
+  int _heartbeatsWithoutFix = 0;
 
   DateTime? get lastRecordedAt => _lastRecordedAt;
+  LocationFix? get lastRecordedFix => _lastRecordedFix;
+  int get heartbeatsWithoutFix => _heartbeatsWithoutFix;
 
   /// Position livrée par le flux (filtrée par distance côté fournisseur).
   TrackingDecision onFix(LocationFix fix, DateTime now) {
@@ -143,10 +152,23 @@ final class AdaptiveTrackingPolicy {
     return const TrackingDecision(record: true);
   }
 
-  /// Le point a bien été créé.
-  void recorded(LocationFix fix, DateTime now) {
+  /// La position active a échoué. Immobile, on enregistre quand même un point avec la
+  /// dernière position connue (le téléphone n'a pas bougé) : plus de trou sur la carte,
+  /// et plus de nouvelle recherche active avant la prochaine échéance.
+  TrackingDecision onFreshFixFailed() {
+    if (mode != MotionMode.still ||
+        _lastRecordedFix == null ||
+        _heartbeatsWithoutFix >= maxHeartbeatsWithoutFix) {
+      return TrackingDecision.none;
+    }
+    return const TrackingDecision(record: true);
+  }
+
+  /// Le point a bien été créé. [withoutFix] : point de repli sans nouvelle position.
+  void recorded(LocationFix fix, DateTime now, {bool withoutFix = false}) {
     _lastRecordedFix = fix;
     _lastRecordedAt = now;
+    _heartbeatsWithoutFix = withoutFix ? _heartbeatsWithoutFix + 1 : 0;
   }
 
   void switched(MotionMode to, DateTime now) {

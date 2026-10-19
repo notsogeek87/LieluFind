@@ -154,4 +154,51 @@ void main() {
       expect(d.switchTo, MotionMode.moving);
     });
   });
+
+  group('aucune position obtenable (téléphone posé, veille profonde)', () {
+    test('immobile : 3 points de repli avec la dernière position, puis arrêt', () {
+      start();
+      for (var i = 1; i <= 3; i++) {
+        at(const Duration(minutes: 15));
+        final d = p.onFreshFixFailed();
+        expect(d.record, isTrue, reason: 'repli $i/3');
+        p.recorded(p.lastRecordedFix!, t, withoutFix: true);
+      }
+      expect(p.heartbeatsWithoutFix, 3);
+      expect(p.onFreshFixFailed().record, isFalse, reason: 'au-delà de 45 min : on ne ment plus');
+    });
+
+    test('une vraie position remet le compteur à zéro', () {
+      start();
+      at(const Duration(minutes: 15));
+      p.recorded(p.lastRecordedFix!, t, withoutFix: true);
+      expect(p.heartbeatsWithoutFix, 1);
+      at(const Duration(minutes: 15));
+      p.recorded(fixAt(3, t), t);
+      expect(p.heartbeatsWithoutFix, 0);
+    });
+
+    test('en mouvement ou sans point précédent : pas de repli', () {
+      expect(p.onFreshFixFailed().record, isFalse, reason: 'aucun point enregistré');
+      start();
+      p.switched(MotionMode.moving, t);
+      expect(p.onFreshFixFailed().record, isFalse, reason: 'on a peut-être bougé');
+    });
+
+    test('le point de repli reporte la prochaine échéance de 15 min (plus de recherche à la minute)', () {
+      p = AdaptiveTrackingPolicy(
+        distance: (a, b) => (a.latitude - b.latitude).abs(),
+        stillHeartbeat: const Duration(minutes: 15),
+        stillFallbackGrace: Duration.zero,
+      );
+      start();
+      at(const Duration(minutes: 15));
+      final stale = fixAt(0, t.subtract(const Duration(minutes: 15)));
+      expect(p.onTick(stale, t).needFreshFix, isTrue);
+      p.recorded(p.lastRecordedFix!, t, withoutFix: true);
+      at(const Duration(minutes: 1));
+      final next = p.onTick(stale, t);
+      expect(next.needFreshFix || next.record, isFalse);
+    });
+  });
 }
