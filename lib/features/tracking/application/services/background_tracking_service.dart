@@ -170,7 +170,7 @@ class BackgroundTrackingEntry {
           // que l'interface prendrait pour un service mort.
           final automation = await container
               .read(pointAutomationServiceProvider.future)
-              .timeout(const Duration(seconds: 2));
+              .timeout(const Duration(seconds: 15));
           snapshot.addAll(automation.healthSnapshot());
         } else {
           snapshot['error'] = 'initialisation en cours';
@@ -385,7 +385,7 @@ final class BackgroundTrackingService {
       // deux essais avant de conclure qu'il est muet.
       for (var attempt = 1; attempt <= 2; attempt++) {
         service.invoke('healthPing', {});
-        final pong = await completer.future.timeout(const Duration(seconds: 8), onTimeout: () => null);
+        final pong = await completer.future.timeout(const Duration(seconds: 15), onTimeout: () => null);
         if (pong != null) return pong;
       }
       return null;

@@ -49,7 +49,7 @@ final class PointAutomationService {
   DateTime? _lastNotificationAt;
 
   /// Fréquence d'évaluation de la santé du suivi.
-  static const _watchdogPeriod = Duration(seconds: 30);
+  static const _watchdogPeriod = Duration(seconds: 120);
 
   final CreatePointFromLocationStreamWorkflow _createPointFromLocationStream;
   final StorePointUseCase _storePoint;
