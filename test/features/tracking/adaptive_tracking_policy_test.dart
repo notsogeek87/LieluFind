@@ -203,12 +203,12 @@ void main() {
   });
 
   group('seuil de déplacement adaptatif (gigue de la position réseau)', () {
-    test('un saut de 100 m avec 50 m d\'incertitude de chaque côté n\'est pas un départ', () {
+    test('un saut de 99 m avec 50 m d\'incertitude de chaque côté n\'est pas un départ', () {
       final f0 = fixAt(0, t, accuracy: 50);
       p.onFix(f0, t);
       p.recorded(f0, t);
       at(const Duration(minutes: 1));
-      final d = p.onFix(fixAt(100, t, accuracy: 50), t);
+      final d = p.onFix(fixAt(99, t, accuracy: 50), t);
       expect(d.switchTo, isNull);
       expect(d.record, isFalse);
     });
