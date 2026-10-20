@@ -30,7 +30,8 @@ final class TrackingDecision {
 final class AdaptiveTrackingPolicy {
   AdaptiveTrackingPolicy({
     required this.distance,
-    this.stillRadiusMeters = 25,
+    // Augmenté à 50m pour réduire les faux départs dus à la gigue réseau (Wi-Fi/antennes).
+    this.stillRadiusMeters = 50,
     this.stillHeartbeat = const Duration(minutes: 5),
     this.stillAfter = const Duration(minutes: 3),
     this.movingInterval = const Duration(seconds: 10),

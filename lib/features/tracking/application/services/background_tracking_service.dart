@@ -168,9 +168,10 @@ class BackgroundTrackingEntry {
         if (container != null) {
           // Ne jamais bloquer la réponse : une réponse « lente » vaut mieux qu'un silence
           // que l'interface prendrait pour un service mort.
+          // Timeout augmenté à 15s pour éviter les faux arrêts (démarrage lent du flux GPS).
           final automation = await container
               .read(pointAutomationServiceProvider.future)
-              .timeout(const Duration(seconds: 2));
+              .timeout(const Duration(seconds: 15));
           snapshot.addAll(automation.healthSnapshot());
         } else {
           snapshot['error'] = 'initialisation en cours';
@@ -383,9 +384,10 @@ final class BackgroundTrackingService {
     try {
       // Un isolate endormi (écran éteint) peut mettre quelques secondes à se réveiller :
       // deux essais avant de conclure qu'il est muet.
+      // Timeout augmenté à 15s pour éviter les faux arrêts (démarrage lent du flux GPS).
       for (var attempt = 1; attempt <= 2; attempt++) {
         service.invoke('healthPing', {});
-        final pong = await completer.future.timeout(const Duration(seconds: 8), onTimeout: () => null);
+        final pong = await completer.future.timeout(const Duration(seconds: 15), onTimeout: () => null);
         if (pong != null) return pong;
       }
       return null;
