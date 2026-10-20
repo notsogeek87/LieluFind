@@ -34,11 +34,11 @@ void main() {
   }
 
   group('immobile', () {
-    test('la gigue Wi-Fi (< 25 m) ne déclenche ni point ni position active', () {
+    test('la gigue Wi-Fi (< 50 m) ne déclenche ni point ni position active', () {
       start();
       for (var i = 0; i < 20; i++) {
         at(const Duration(seconds: 10));
-        final jitter = fixAt(i.isEven ? 15 : -12, t);
+        final jitter = fixAt(i.isEven ? 30 : -25, t);
         expect(p.onFix(jitter, t).record, isFalse, reason: 'avant 5 min : rien');
         final tick = p.onTick(jitter, t);
         expect(tick.record || tick.needFreshFix, isFalse);
@@ -81,10 +81,10 @@ void main() {
   });
 
   group('changement de mode', () {
-    test('un déplacement de 25 m passe en mouvement et enregistre', () {
+    test('un déplacement de 50 m passe en mouvement et enregistre', () {
       start();
       at(const Duration(seconds: 30));
-      final d = p.onFix(fixAt(40, t), t);
+      final d = p.onFix(fixAt(70, t), t);
       expect(d.record, isTrue);
       expect(d.switchTo, MotionMode.moving);
     });
@@ -92,29 +92,29 @@ void main() {
     test('en mouvement : au plus un point par intervalle', () {
       start();
       at(const Duration(seconds: 30));
-      final f = fixAt(40, t);
+      final f = fixAt(70, t);
       p.onFix(f, t);
       p.switched(MotionMode.moving, t);
       p.recorded(f, t);
 
       at(const Duration(seconds: 5));
-      expect(p.onFix(fixAt(80, t), t).record, isFalse, reason: 'moins de 10 s');
+      expect(p.onFix(fixAt(140, t), t).record, isFalse, reason: 'moins de 10 s');
       at(const Duration(seconds: 5));
-      expect(p.onFix(fixAt(120, t), t).record, isTrue);
+      expect(p.onFix(fixAt(210, t), t).record, isTrue);
     });
 
     test('retour en immobile après 3 min sans déplacement', () {
       start();
       at(const Duration(seconds: 30));
-      final f = fixAt(40, t);
+      final f = fixAt(70, t);
       p.onFix(f, t);
       p.switched(MotionMode.moving, t);
       p.recorded(f, t);
 
       at(const Duration(minutes: 2, seconds: 50));
-      expect(p.onTick(fixAt(45, t), t).switchTo, isNull);
+      expect(p.onTick(fixAt(75, t), t).switchTo, isNull);
       at(const Duration(seconds: 10));
-      expect(p.onTick(fixAt(45, t), t).switchTo, MotionMode.still);
+      expect(p.onTick(fixAt(75, t), t).switchTo, MotionMode.still);
     });
 
     test('un téléphone immobile qui démarre est détecté par la position active', () {
@@ -203,12 +203,12 @@ void main() {
   });
 
   group('seuil de déplacement adaptatif (gigue de la position réseau)', () {
-    test('un saut de 60 m avec 50 m d\'incertitude de chaque côté n\'est pas un départ', () {
+    test('un saut de 100 m avec 50 m d\'incertitude de chaque côté n\'est pas un départ', () {
       final f0 = fixAt(0, t, accuracy: 50);
       p.onFix(f0, t);
       p.recorded(f0, t);
       at(const Duration(minutes: 1));
-      final d = p.onFix(fixAt(60, t, accuracy: 50), t);
+      final d = p.onFix(fixAt(100, t, accuracy: 50), t);
       expect(d.switchTo, isNull);
       expect(d.record, isFalse);
     });
