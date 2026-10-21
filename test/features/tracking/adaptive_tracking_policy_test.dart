@@ -46,9 +46,9 @@ void main() {
       expect(p.mode, MotionMode.still);
     });
 
-    test('la livraison du fournisseur toutes les 5 min est le point « toujours là »', () {
+    test('la livraison du fournisseur toutes les 15 min est le point « toujours là »', () {
       start();
-      at(const Duration(minutes: 4));
+      at(const Duration(minutes: 14));
       expect(p.onFix(fixAt(3, t), t).record, isFalse, reason: 'trop tôt');
       at(const Duration(seconds: 40));
       expect(p.onFix(fixAt(3, t), t).record, isTrue, reason: 'livraison un peu en avance acceptée');
@@ -56,15 +56,15 @@ void main() {
 
     test('le minuteur ne demande pas de position active tant que le fournisseur peut encore livrer', () {
       start();
-      at(const Duration(minutes: 5));
-      final d = p.onTick(fixAt(0, t.subtract(const Duration(minutes: 5))), t);
+      at(const Duration(minutes: 15));
+      final d = p.onTick(fixAt(0, t.subtract(const Duration(minutes: 15))), t);
       expect(d.record || d.needFreshFix, isFalse);
     });
 
     test('rien livré : une seule demande active de secours, pas une par tick', () {
       start();
-      at(const Duration(minutes: 6, seconds: 30));
-      final stale = fixAt(0, t.subtract(const Duration(minutes: 6)));
+      at(const Duration(minutes: 16, seconds: 30));
+      final stale = fixAt(0, t.subtract(const Duration(minutes: 16)));
       expect(p.onTick(stale, t).needFreshFix, isTrue);
       at(const Duration(seconds: 20));
       expect(p.onTick(stale, t).needFreshFix, isFalse, reason: 'attendre 60 s avant de redemander');
@@ -74,7 +74,7 @@ void main() {
 
     test('la position active obtenue est enregistrée (point dû)', () {
       start();
-      at(const Duration(minutes: 5));
+      at(const Duration(minutes: 15));
       expect(p.onFreshFix(fixAt(2, t), t).record, isTrue);
       expect(p.mode, MotionMode.still);
     });
@@ -84,7 +84,7 @@ void main() {
     test('un déplacement de 50 m passe en mouvement et enregistre', () {
       start();
       at(const Duration(seconds: 30));
-      final d = p.onFix(fixAt(70, t), t);
+      final d = p.onFix(fixAt(100, t), t);
       expect(d.record, isTrue);
       expect(d.switchTo, MotionMode.moving);
     });
@@ -119,7 +119,7 @@ void main() {
 
     test('un téléphone immobile qui démarre est détecté par la position active', () {
       start();
-      at(const Duration(minutes: 5));
+      at(const Duration(minutes: 15));
       final d = p.onFreshFix(fixAt(300, t), t);
       expect(d.record, isTrue);
       expect(d.switchTo, MotionMode.moving);
