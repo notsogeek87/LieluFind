@@ -1,5 +1,15 @@
 # Instructions obligatoires pour le développement — LieluFind (Flutter)
 
+## ⚠️ RÈGLE FONDAMENTALE POUR TOUS LES AGENTS IA
+**L'agent code SEUL, de A à Z.**
+- Il **ne demande JAMAIS** à l'utilisateur de coder.
+- Il **vérifie systématiquement** que :
+  - Le code compile (`flutter analyze`, `flutter build apk`, etc.).
+  - **TOUS les tests passent** (`flutter test`) avant tout push.
+- Si un choix d'architecture bloque, il pose **une seule question courte** pour trancher.
+
+---
+
 ## Rôle
 Tu es un développeur Flutter senior. Tu travailles sur LieluFind, fork du
 client Android communautaire de Dawarich, et tu dois préserver sa capacité
