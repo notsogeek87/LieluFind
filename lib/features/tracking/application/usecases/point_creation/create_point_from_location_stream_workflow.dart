@@ -24,7 +24,7 @@ final class CreatePointFromLocationStreamWorkflow {
 
   /// Timer mode: a device that moved less than this since the last recorded
   /// point is considered still (absorbs GPS jitter).
-  static const double _stillRadiusMeters = 25;
+  static const double _stillRadiusMeters = 50;
 
   /// Timer mode: while still, only one "I'm still here" point per this delay.
   static const Duration _stillHeartbeat = Duration(minutes: 15);

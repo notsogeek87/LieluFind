@@ -31,7 +31,7 @@ final class AdaptiveTrackingPolicy {
   AdaptiveTrackingPolicy({
     required this.distance,
     this.stillRadiusMeters = 50,
-    this.stillHeartbeat = const Duration(minutes: 5),
+    this.stillHeartbeat = const Duration(minutes: 15),
     this.stillAfter = const Duration(minutes: 3),
     this.movingInterval = const Duration(seconds: 10),
     this.maxFixAge = const Duration(seconds: 60),
