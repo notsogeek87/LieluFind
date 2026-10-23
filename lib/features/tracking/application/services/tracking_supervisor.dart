@@ -54,7 +54,25 @@ final class TrackingSupervisor implements TrackingHealthSink {
     this.maxPointGap = const Duration(minutes: 22),
     this.startupGrace = const Duration(seconds: 90),
     this.stableAfter = const Duration(minutes: 2),
+    this.isNight,
+    this.nightMaxPointGap,
   });
+
+  /// Dit si un instant tombe dans la nuit (null = jamais).
+  final bool Function(DateTime t)? isNight;
+
+  /// Silence maximal sans point la nuit, quand le rythme « immobile » est plus lent.
+  final Duration? nightMaxPointGap;
+
+  /// Un point enregistré la nuit annonce le prochain à la cadence de nuit,
+  /// même si l'on est déjà au matin : la tolérance suit le dernier point, pas l'heure.
+  Duration _allowedGap(DateTime t, DateTime lastPointOrStart) {
+    final night = nightMaxPointGap;
+    if (night == null) return maxPointGap;
+    final nightly = isNight;
+    if (nightly == null) return maxPointGap;
+    return nightly(t) || nightly(lastPointOrStart) ? night : maxPointGap;
+  }
 
   /// (Ré)abonne le flux de localisation.
   final Future<void> Function() startStream;
@@ -142,7 +160,7 @@ final class TrackingSupervisor implements TrackingHealthSink {
     }
 
     final lastPointOrStart = _lastPoint ?? started;
-    if (t.difference(lastPointOrStart) > maxPointGap) return HealthIssue.noPoint;
+    if (t.difference(lastPointOrStart) > _allowedGap(t, lastPointOrStart)) return HealthIssue.noPoint;
 
     return null;
   }

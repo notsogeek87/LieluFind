@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:dawarich/core/domain/models/point/local/local_point.dart';
 import 'package:dawarich/features/tracking/application/repositories/location_provider_interface.dart';
 import 'package:dawarich/features/tracking/application/services/adaptive_tracking_policy.dart';
+import 'package:dawarich/features/tracking/application/services/night_schedule.dart';
 import 'package:dawarich/features/tracking/application/services/tracking_log.dart';
 import 'package:dawarich/features/tracking/application/services/tracking_supervisor.dart';
 import 'package:dawarich/features/tracking/application/usecases/point_creation/create_point_usecase.dart';
@@ -28,6 +29,9 @@ final class CreatePointFromLocationStreamWorkflow {
 
   /// Timer mode: while still, only one "I'm still here" point per this delay.
   static const Duration _stillHeartbeat = Duration(minutes: 15);
+
+  /// Immobile, la nuit : point « toujours là » moins fréquent (économie de radio).
+  static const NightSchedule _night = NightSchedule();
 
   /// Immobile : vérification gratuite (dernière position connue) pour détecter un départ.
   static const Duration _stillProbeInterval = Duration(minutes: 5);
@@ -229,6 +233,8 @@ final class CreatePointFromLocationStreamWorkflow {
       // Le flux passif ne livre rien de régulier : le minuteur prend le relais pile à l'heure.
       stillFallbackGrace: Duration.zero,
       movingInterval: Duration(seconds: frequencySeconds),
+      nightHeartbeat: _night.heartbeat,
+      isNight: _night.isNight,
     );
 
     // Journal horaire : d'où viennent les positions à l'arrêt (pour mesurer le gain).

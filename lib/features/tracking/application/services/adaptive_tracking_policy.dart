@@ -40,7 +40,20 @@ final class AdaptiveTrackingPolicy {
     this.stillFallbackGrace = const Duration(seconds: 90),
     this.maxHeartbeatsWithoutFix = 3,
     this.maxMovementThresholdMeters = 150,
+    this.nightHeartbeat,
+    this.isNight,
   });
+
+  /// Immobile, la nuit : période du point « toujours là » (null = comme le jour).
+  final Duration? nightHeartbeat;
+
+  /// Dit si [now] tombe dans la nuit (null = jamais).
+  final bool Function(DateTime now)? isNight;
+
+  Duration _heartbeat(DateTime now) {
+    final night = nightHeartbeat;
+    return night != null && (isNight?.call(now) ?? false) ? night : stillHeartbeat;
+  }
 
   /// Distance en mètres entre deux positions.
   final double Function(LocationFix a, LocationFix b) distance;
@@ -111,7 +124,7 @@ final class AdaptiveTrackingPolicy {
         if (!moved) {
           // Livraison périodique du fournisseur : c'est le point « toujours là ».
           final lastAt = _lastRecordedAt;
-          final due = lastAt == null || now.difference(lastAt) >= stillHeartbeat - deliverySlack;
+          final due = lastAt == null || now.difference(lastAt) >= _heartbeat(now) - deliverySlack;
           return TrackingDecision(record: due);
         }
         _lastMoveAt = now;
@@ -139,7 +152,7 @@ final class AdaptiveTrackingPolicy {
     // n'est qu'un secours s'il n'a rien livré.
     final period = mode == MotionMode.moving && switchTo == null
         ? stillAfter
-        : stillHeartbeat + stillFallbackGrace;
+        : _heartbeat(now) + stillFallbackGrace;
     final due = lastAt == null || now.difference(lastAt) >= period;
     if (!due) return TrackingDecision(switchTo: switchTo);
 

@@ -11,6 +11,7 @@ import 'package:dawarich/features/tracking/domain/models/tracker_settings.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'night_schedule.dart';
 import 'tracking_log.dart';
 import 'tracking_supervisor.dart';
 import 'package:option_result/option_result.dart';
@@ -43,6 +44,9 @@ final class PointAutomationService {
   /// chaque point garderait la radio 4G allumée en permanence. Retard maximal sur la
   /// carte en mouvement : environ 20 + 30 + 30 s.
   static const _minUploadSpacing = Duration(seconds: 30);
+
+  /// Même horaire de nuit que le flux : le superviseur tolère le silence plus long.
+  static const NightSchedule _night = NightSchedule();
 
   /// Au plus une mise à jour de la notification par minute.
   static const _minNotificationSpacing = Duration(seconds: 60);
@@ -130,6 +134,8 @@ final class PointAutomationService {
       blockedReason: _blockedReason,
       log: (m) => unawaited(TrackingLog.add(m)),
       tickInterval: Duration(seconds: _currentSettings?.trackingFrequency ?? 10),
+      isNight: _night.isNight,
+      nightMaxPointGap: _night.maxPointGap,
     );
     _supervisor = sup;
     _watchdogTimer = Timer.periodic(_watchdogPeriod, (_) {
