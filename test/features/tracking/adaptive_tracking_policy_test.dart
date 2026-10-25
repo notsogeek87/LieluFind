@@ -230,4 +230,82 @@ void main() {
       expect(p.onFix(fixAt(200, t, accuracy: 1000), t).switchTo, MotionMode.moving);
     });
   });
+
+  group('veille profonde (capteur de mouvement, alarme)', () {
+    // Réglage du flux réel : pas de délai de grâce, le minuteur (ou l'alarme) est à l'heure.
+    setUp(() {
+      p = AdaptiveTrackingPolicy(
+        distance: (a, b) => (a.latitude - b.latitude).abs(),
+        stillFallbackGrace: Duration.zero,
+      );
+    });
+
+    test('le capteur de mouvement fait repartir en mouvement, sans point ni position active', () {
+      start();
+      at(const Duration(minutes: 7));
+      final d = p.onMotion(t);
+      expect(d.switchTo, MotionMode.moving);
+      expect(d.record, isFalse);
+      expect(d.needFreshFix, isFalse);
+    });
+
+    test('fausse alerte du capteur : retour en immobile après 3 min sans déplacement', () {
+      start();
+      at(const Duration(minutes: 7));
+      p.switched(p.onMotion(t).switchTo!, t);
+      at(const Duration(minutes: 2));
+      expect(p.onTick(fixAt(5, t), t).switchTo, isNull, reason: 'encore dans le délai');
+      at(const Duration(minutes: 1));
+      expect(p.onTick(fixAt(5, t), t).switchTo, MotionMode.still);
+    });
+
+    test('en mouvement, le capteur ne change rien', () {
+      start();
+      p.switched(MotionMode.moving, t);
+      expect(p.onMotion(t).switchTo, isNull);
+    });
+
+    test("l'alarme vise l'échéance du point « toujours là »", () {
+      start();
+      expect(p.untilHeartbeatDue(t), const Duration(minutes: 15));
+      at(const Duration(minutes: 10));
+      expect(p.untilHeartbeatDue(t), const Duration(minutes: 5));
+      at(const Duration(minutes: 6));
+      expect(p.untilHeartbeatDue(t), Duration.zero, reason: 'déjà dû');
+    });
+
+    test("à l'échéance de l'alarme, le minuteur enregistre le point dû", () {
+      start();
+      at(p.untilHeartbeatDue(t));
+      final d = p.onTick(fixAt(2, t), t);
+      expect(d.record, isTrue);
+    });
+
+    test("la nuit, l'alarme suit la cadence de nuit", () {
+      final night = AdaptiveTrackingPolicy(
+        distance: (a, b) => (a.latitude - b.latitude).abs(),
+        stillFallbackGrace: Duration.zero,
+        nightHeartbeat: const Duration(minutes: 30),
+        isNight: (now) => now.hour >= 23 || now.hour < 7,
+      );
+      t = DateTime.utc(2026, 1, 1, 23, 10);
+      night.recorded(fixAt(0, t), t);
+      expect(night.untilHeartbeatDue(t), const Duration(minutes: 30));
+    });
+
+    test("l'échéance inclut le délai de grâce, comme le minuteur", () {
+      final graced = AdaptiveTrackingPolicy(distance: (a, b) => (a.latitude - b.latitude).abs());
+      graced.recorded(fixAt(0, t), t);
+      final wait = graced.untilHeartbeatDue(t);
+      expect(wait, const Duration(minutes: 16, seconds: 30));
+      at(wait - const Duration(seconds: 1));
+      expect(graced.onTick(fixAt(0, t), t).record, isFalse, reason: 'une seconde trop tôt');
+      at(const Duration(seconds: 1));
+      expect(graced.onTick(fixAt(0, t), t).record, isTrue);
+    });
+
+    test('sans point enregistré, pas d\'attente', () {
+      expect(p.untilHeartbeatDue(t), Duration.zero);
+    });
+  });
 }

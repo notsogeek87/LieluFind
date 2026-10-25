@@ -36,6 +36,10 @@ abstract interface class TrackingHealthSink {
 
   /// Le flux s'est terminé alors qu'il ne devrait jamais le faire.
   void onStreamDone();
+
+  /// Immobile, le téléphone a le droit de dormir : le minuteur se tait et le
+  /// point « toujours là » arrive par une alarme, parfois avec du retard.
+  void onSleepAllowed(bool allowed);
 }
 
 /// Pourquoi le superviseur juge le suivi en panne.
@@ -56,7 +60,12 @@ final class TrackingSupervisor implements TrackingHealthSink {
     this.stableAfter = const Duration(minutes: 2),
     this.isNight,
     this.nightMaxPointGap,
+    this.sleepGapSlack = const Duration(minutes: 15),
   });
+
+  /// Veille autorisée : retard toléré en plus du silence maximal sans point
+  /// (une alarme inexacte peut être repoussée par Android).
+  final Duration sleepGapSlack;
 
   /// Dit si un instant tombe dans la nuit (null = jamais).
   final bool Function(DateTime t)? isNight;
@@ -106,6 +115,7 @@ final class TrackingSupervisor implements TrackingHealthSink {
   DateTime? _nextAttemptAt;
   Object? _pendingError;
   bool _streamDone = false;
+  bool _sleepAllowed = false;
   bool _recovering = false;
   String? _lastBlocked;
   int _attempts = 0;
@@ -142,6 +152,11 @@ final class TrackingSupervisor implements TrackingHealthSink {
   @override
   void onStreamDone() => _streamDone = true;
 
+  @override
+  void onSleepAllowed(bool allowed) => _sleepAllowed = allowed;
+
+  bool get sleepAllowed => _sleepAllowed;
+
   /// Verdict de santé, sans effet de bord.
   HealthIssue? evaluate() {
     final t = now();
@@ -155,12 +170,14 @@ final class TrackingSupervisor implements TrackingHealthSink {
     if (lastSign == null) {
       return t.difference(started) > startupGrace ? HealthIssue.neverStarted : null;
     }
-    if (t.difference(lastSign) > tickInterval * 3 + const Duration(seconds: 30)) {
+    // Téléphone endormi : le minuteur se tait, ce n'est pas une panne.
+    if (!_sleepAllowed && t.difference(lastSign) > tickInterval * 3 + const Duration(seconds: 30)) {
       return HealthIssue.timerSilent;
     }
 
     final lastPointOrStart = _lastPoint ?? started;
-    if (t.difference(lastPointOrStart) > _allowedGap(t, lastPointOrStart)) return HealthIssue.noPoint;
+    final gap = _allowedGap(t, lastPointOrStart) + (_sleepAllowed ? sleepGapSlack : Duration.zero);
+    if (t.difference(lastPointOrStart) > gap) return HealthIssue.noPoint;
 
     return null;
   }

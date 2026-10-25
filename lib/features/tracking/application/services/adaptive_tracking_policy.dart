@@ -190,6 +190,24 @@ final class AdaptiveTrackingPolicy {
     return const TrackingDecision(record: true);
   }
 
+  /// Le capteur de mouvement significatif s'est déclenché à l'arrêt : on repart en
+  /// mouvement sans attendre de position. Fausse alerte : retour en immobile après
+  /// [stillAfter] sans déplacement, comme d'habitude.
+  TrackingDecision onMotion(DateTime now) {
+    if (mode == MotionMode.moving) return TrackingDecision.none;
+    _lastMoveAt = now;
+    return const TrackingDecision(switchTo: MotionMode.moving);
+  }
+
+  /// Immobile : temps restant avant le prochain point « toujours là », pour
+  /// programmer l'alarme qui réveillera le téléphone. Zéro s'il est déjà dû.
+  Duration untilHeartbeatDue(DateTime now) {
+    final lastAt = _lastRecordedAt;
+    if (lastAt == null) return Duration.zero;
+    final left = lastAt.add(_heartbeat(now) + stillFallbackGrace).difference(now);
+    return left.isNegative ? Duration.zero : left;
+  }
+
   /// Le point a bien été créé. [withoutFix] : point de repli sans nouvelle position.
   void recorded(LocationFix fix, DateTime now, {bool withoutFix = false}) {
     _lastRecordedFix = fix;

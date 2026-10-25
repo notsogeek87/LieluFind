@@ -1,0 +1,19 @@
+name: lielu_power
+description: "Veille profonde du suivi LieluFind : alarme de réveil, capteur de mouvement significatif, wakelocks courts (Android, sans services Google)."
+version: 0.1.0
+publish_to: 'none'
+
+environment:
+  sdk: ^3.5.0
+  flutter: '>=3.3.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: eu.lielu.lielu_power
+        pluginClass: LieluPowerPlugin

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:dawarich/core/network/secondary_account.dart';
 import 'package:dawarich/core/application/usecases/api/delete_point_usecase.dart';
 import 'package:dawarich/core/application/usecases/api/get_points_usecase.dart';
@@ -17,12 +19,14 @@ import 'package:dawarich/features/stats/data/repositories/stats_repository.dart'
 import 'package:dawarich/features/stats/data/sources/local/stats_local_data_source.dart';
 import 'package:dawarich/features/stats/data/sources/remote/stats_remote_data_source.dart';
 import 'package:dawarich/features/stats/presentation/converters/countries_mapper.dart';
+import 'package:dawarich/features/tracking/application/repositories/device_power_interface.dart';
 import 'package:dawarich/features/tracking/application/repositories/location_provider_interface.dart';
 import 'package:dawarich/features/tracking/application/services/tracking_notification_service.dart';
 import 'package:dawarich/features/tracking/application/usecases/notifications/cancel_tracker_notification_usecase.dart';
 import 'package:dawarich/features/tracking/application/usecases/notifications/initialize_tracker_notification_usecase.dart';
 import 'package:dawarich/features/tracking/application/usecases/notifications/was_launched_from_notification_usecase.dart';
 import 'package:dawarich/features/tracking/application/usecases/point_creation/create_point_usecase.dart';
+import 'package:dawarich/features/tracking/data/repositories/device_power.dart';
 import 'package:dawarich/features/tracking/data/repositories/location_provider.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core_providers.dart';
@@ -108,6 +112,11 @@ final hardwareRepositoryProvider = Provider<IHardwareRepository>((ref) {
 
 final locationProviderProvider = Provider<ILocationProvider>((ref) {
   return LocationProvider();
+});
+
+/// Veille profonde à l'arrêt : plugin natif Android uniquement.
+final devicePowerProvider = Provider<IDevicePower?>((ref) {
+  return Platform.isAndroid ? const DevicePower() : null;
 });
 
 final trackerSettingsRepositoryProvider = FutureProvider<ITrackerSettingsRepository>((ref) async {
@@ -260,7 +269,8 @@ final createPointFromLocationStreamWorkflowProvider = FutureProvider<CreatePoint
   final getSettings = await ref.watch(getTrackerSettingsUseCaseProvider.future);
   final locationProvider = ref.watch(locationProviderProvider);
   final createFromPos = await ref.watch(createPointFromPositionUseCaseProvider.future);
-  return CreatePointFromLocationStreamWorkflow(getSettings, locationProvider, createFromPos);
+  final power = ref.watch(devicePowerProvider);
+  return CreatePointFromLocationStreamWorkflow(getSettings, locationProvider, createFromPos, power: power);
 });
 
 final pointAutomationServiceProvider = FutureProvider<PointAutomationService>((ref) async {

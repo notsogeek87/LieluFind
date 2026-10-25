@@ -107,6 +107,40 @@ void main() {
     });
   });
 
+  group('veille profonde à l\'arrêt', () {
+    test('téléphone endormi : un minuteur muet n\'est pas une panne', () async {
+      h.healthyFor(const Duration(minutes: 1));
+      h.sup.onPoint();
+      h.sup.onSleepAllowed(true);
+      h.advance(const Duration(minutes: 14));
+      expect(h.sup.evaluate(), isNull);
+      await h.sup.check();
+      expect(h.starts, 0);
+    });
+
+    test('téléphone endormi : une alarme repoussée par Android est tolérée', () {
+      h.sup.onPoint();
+      h.sup.onSleepAllowed(true);
+      h.advance(const Duration(minutes: 30));
+      expect(h.sup.evaluate(), isNull, reason: '22 min + 15 min de marge');
+    });
+
+    test('téléphone endormi : aucun point bien au-delà de la marge reste une panne', () {
+      h.sup.onPoint();
+      h.sup.onSleepAllowed(true);
+      h.advance(const Duration(minutes: 38));
+      expect(h.sup.evaluate(), HealthIssue.noPoint);
+    });
+
+    test('réveillé (en mouvement) : le minuteur muet redevient une panne', () {
+      h.healthyFor(const Duration(minutes: 1));
+      h.sup.onSleepAllowed(true);
+      h.sup.onSleepAllowed(false);
+      h.advance(const Duration(minutes: 2));
+      expect(h.sup.evaluate(), HealthIssue.timerSilent);
+    });
+  });
+
   group('permissions, GPS, session', () {
     test('permission manquante : pas de relance, puis reprise quand elle revient', () async {
       h.sup.onStreamDone();

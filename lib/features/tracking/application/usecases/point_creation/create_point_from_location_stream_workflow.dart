@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:dawarich/core/domain/models/point/local/local_point.dart';
+import 'package:dawarich/features/tracking/application/repositories/device_power_interface.dart';
 import 'package:dawarich/features/tracking/application/repositories/location_provider_interface.dart';
 import 'package:dawarich/features/tracking/application/services/adaptive_tracking_policy.dart';
 import 'package:dawarich/features/tracking/application/services/night_schedule.dart';
@@ -23,6 +24,9 @@ final class CreatePointFromLocationStreamWorkflow {
   final ILocationProvider _locationProvider;
   final CreatePointUseCase _createPointFromLocationFix;
 
+  /// Veille profonde à l'arrêt (null : le téléphone reste éveillé, comme avant).
+  final IDevicePower? _power;
+
   /// Timer mode: a device that moved less than this since the last recorded
   /// point is considered still (absorbs GPS jitter).
   static const double _stillRadiusMeters = 50;
@@ -42,12 +46,16 @@ final class CreatePointFromLocationStreamWorkflow {
   /// Timer mode: the location stream only reports after this much movement.
   static const int _streamDistanceMeters = 10;
 
+  /// Veille profonde : jamais deux réveils à moins de ce délai.
+  static const Duration _minWakeDelay = Duration(minutes: 1);
+
 
   CreatePointFromLocationStreamWorkflow(
     this._getTrackerSettings,
     this._locationProvider,
-    this._createPointFromLocationFix,
-  );
+    this._createPointFromLocationFix, {
+    IDevicePower? power,
+  }) : _power = power;
 
   /// Returns a stream of location points based on user settings.
   ///
@@ -216,6 +224,10 @@ final class CreatePointFromLocationStreamWorkflow {
   ///   seulement si le téléphone n'en a pas de récente) ;
   /// - **en mouvement** : cadence normale ([frequencySeconds]), retour en
   ///   immobile après 3 min sans déplacement.
+  ///
+  /// Avec [_power] (Android), le téléphone dort à l'arrêt, comme avec Traccar : le
+  /// point « toujours là » vient d'une alarme, le départ du capteur de mouvement
+  /// significatif (le sondage de 5 min, source de faux départs, n'est plus utile).
   Stream<Result<LocalPoint, String>> _getTimerPointStream(
     int userId,
     LocationPrecision precision,
@@ -239,8 +251,52 @@ final class CreatePointFromLocationStreamWorkflow {
 
     // Journal horaire : d'où viennent les positions à l'arrêt (pour mesurer le gain).
     var cheapFixes = 0, activeFixes = 0, passiveFixes = 0, modeSwitches = 0;
+    var alarmWakes = 0, motionWakes = 0;
     var statsSince = DateTime.now();
     DateTime? lastProbeAt;
+
+    // Veille profonde à l'arrêt.
+    final power = _power;
+    var sleepEnabled = false;
+    var motionSensor = false;
+    var motionArmed = false;
+    DateTime? wakeArmedFor;
+    StreamSubscription<DeviceWake>? wakeSub;
+
+    /// Immobile : prochain réveil à l'échéance du point « toujours là » (ou du
+    /// sondage de position, sans capteur de mouvement) et capteur réarmé.
+    Future<void> keepSleepArmed() async {
+      if (power == null || !sleepEnabled || policy.mode != MotionMode.still) return;
+      try {
+        if (motionSensor && !motionArmed) motionArmed = await power.watchMotion(true);
+        var delay = policy.untilHeartbeatDue(DateTime.now());
+        if (!motionSensor && delay > _stillProbeInterval) delay = _stillProbeInterval;
+        if (delay < _minWakeDelay) delay = _minWakeDelay;
+        final at = DateTime.now().add(delay);
+        // Même échéance qu'une alarme encore à venir : rien à reprogrammer.
+        final armed = wakeArmedFor;
+        if (armed != null && armed.isAfter(DateTime.now()) && at.difference(armed).abs() < const Duration(seconds: 30)) {
+          return;
+        }
+        wakeArmedFor = at;
+        await power.scheduleWake(delay);
+      } catch (e) {
+        unawaited(TrackingLog.addThrottled('sleep', 'Veille profonde : armement impossible ($e)'));
+      }
+    }
+
+    /// En mouvement, le flux de position tient le téléphone éveillé : plus d'alarme ni de capteur.
+    Future<void> leaveSleep() async {
+      if (power == null || !sleepEnabled) return;
+      wakeArmedFor = null;
+      motionArmed = false;
+      try {
+        await power.cancelWake();
+        await power.watchMotion(false);
+      } catch (e) {
+        unawaited(TrackingLog.addThrottled('sleep', 'Veille profonde : désarmement impossible ($e)'));
+      }
+    }
 
     /// Dernière position connue du téléphone si elle est récente : coût nul.
     Future<LocationFix?> cheapFix() async {
@@ -303,6 +359,8 @@ final class CreatePointFromLocationStreamWorkflow {
         policy.switched(to, DateTime.now());
         modeSwitches++;
         subscribe(to);
+        health?.onSleepAllowed(sleepEnabled && to == MotionMode.still);
+        if (to == MotionMode.moving) await leaveSleep();
         if (kDebugMode) debugPrint('[LocationStream] Mode → ${to.name}');
       }
       if (decision.record && fix != null) await record(fix);
@@ -310,11 +368,13 @@ final class CreatePointFromLocationStreamWorkflow {
 
     // Les événements (positions, ticks) sont traités un par un : jamais deux
     // créations de point ni deux demandes de position active en parallèle.
+    // Après chaque événement, l'alarme suit la nouvelle échéance (point enregistré, mode changé).
     Future<void> serialized(Future<void> Function() job) async {
       if (busy) return;
       busy = true;
       try {
         await job();
+        await keepSleepArmed();
       } finally {
         busy = false;
       }
@@ -345,9 +405,24 @@ final class CreatePointFromLocationStreamWorkflow {
     controller.onCancel = () async {
       timer?.cancel();
       await locationSub?.cancel();
+      await wakeSub?.cancel();
+      await leaveSleep();
     };
 
     try {
+      if (power != null) {
+        try {
+          final released = await power.releaseServiceWakeLock();
+          motionSensor = await power.watchMotion(false);
+          sleepEnabled = true;
+          unawaited(TrackingLog.add('Veille profonde à l\'arrêt : wakelock du service relâché ($released), '
+              'capteur de mouvement ${motionSensor ? 'présent' : 'absent (sondage toutes les 5 min)'}'));
+        } catch (e) {
+          unawaited(TrackingLog.add('Veille profonde indisponible, téléphone tenu éveillé : $e'));
+        }
+      }
+      health?.onSleepAllowed(sleepEnabled && policy.mode == MotionMode.still);
+
       subscribe(policy.mode);
 
       final initialResult = await _fixNow(fixRequest);
@@ -361,69 +436,97 @@ final class CreatePointFromLocationStreamWorkflow {
         debugPrint('[LocationStream] Adaptive mode: moving interval = ${frequencySeconds}s');
       }
 
+      // Un événement à la fois : le minuteur (téléphone éveillé) et l'alarme
+      // (téléphone endormi) déclenchent le même travail.
+      Future<void> tick() async {
+        final now = DateTime.now();
+        if (now.difference(statsSince) >= const Duration(hours: 1)) {
+          unawaited(TrackingLog.add('Positions (1 h) : $cheapFixes en cache, $activeFixes actives, $passiveFixes reçues du flux, '
+              '$modeSwitches changements de mode, mode ${policy.mode.name}'
+              '${sleepEnabled ? ', réveils : $alarmWakes alarme, $motionWakes mouvement' : ''}'));
+          cheapFixes = 0;
+          activeFixes = 0;
+          passiveFixes = 0;
+          modeSwitches = 0;
+          alarmWakes = 0;
+          motionWakes = 0;
+          statsSince = now;
+        }
+
+        // Immobile, sans capteur de mouvement : détection de départ par la dernière
+        // position connue (gratuite). Avec le capteur, ce sondage n'apporte que des
+        // faux départs (la position réseau saute sans que l'on bouge).
+        final probeAt = lastProbeAt;
+        if (policy.mode == MotionMode.still &&
+            !(sleepEnabled && motionSensor) &&
+            (probeAt == null || now.difference(probeAt) >= _stillProbeInterval)) {
+          lastProbeAt = now;
+          final probe = await cheapFix();
+          final latest = latestFix;
+          if (probe != null && (latest == null || probe.timestampUtc.isAfter(latest.timestampUtc))) {
+            latestFix = probe;
+            health?.onFix();
+            cheapFixes++;
+            await apply(policy.onFix(probe, DateTime.now()), probe);
+          }
+        }
+
+        final decision = policy.onTick(latestFix, DateTime.now());
+        if (decision.needFreshFix) {
+          if (decision.switchTo != null) await apply(TrackingDecision(switchTo: decision.switchTo), null);
+          final cached = await cheapFix();
+          if (cached != null) cheapFixes++;
+          final current = cached != null ? Ok<LocationFix, String>(cached) : await _fixNow(fixRequest);
+          if (cached == null && current is Ok) activeFixes++;
+          if (current case Ok(value: final fix)) {
+            latestFix = fix;
+            health?.onFix();
+            await apply(policy.onFreshFix(fix, DateTime.now()), fix);
+          } else if (current case Err(value: final err)) {
+            // Aucune position obtenable : à l'arrêt, point « toujours là » avec la
+            // dernière position connue (pas de trou, pas de recherche à la minute).
+            final fallback = policy.lastRecordedFix;
+            if (policy.onFreshFixFailed().record && fallback != null) {
+              unawaited(TrackingLog.addThrottled('no-fix',
+                  'Position introuvable ($err) : point conservé à la dernière position (${policy.heartbeatsWithoutFix + 1}/3)',
+                  every: const Duration(minutes: 10)));
+              await record(fallback, withoutFix: true);
+            } else if (!controller.isClosed) {
+              controller.add(Err('No location available: $err'));
+            }
+          }
+          return;
+        }
+        await apply(decision, latestFix);
+      }
+
       timer = Timer.periodic(Duration(seconds: frequencySeconds), (t) {
         if (controller.isClosed) {
           t.cancel();
           return;
         }
         health?.onTick();
-
-        unawaited(serialized(() async {
-          final now = DateTime.now();
-          if (now.difference(statsSince) >= const Duration(hours: 1)) {
-            unawaited(TrackingLog.add('Positions (1 h) : $cheapFixes en cache, $activeFixes actives, $passiveFixes reçues du flux, '
-                '$modeSwitches changements de mode, mode ${policy.mode.name}'));
-            cheapFixes = 0;
-            activeFixes = 0;
-            passiveFixes = 0;
-            modeSwitches = 0;
-            statsSince = now;
-          }
-
-          // Immobile : détection de départ par la dernière position connue (gratuite).
-          final probeAt = lastProbeAt;
-          if (policy.mode == MotionMode.still &&
-              (probeAt == null || now.difference(probeAt) >= _stillProbeInterval)) {
-            lastProbeAt = now;
-            final probe = await cheapFix();
-            final latest = latestFix;
-            if (probe != null && (latest == null || probe.timestampUtc.isAfter(latest.timestampUtc))) {
-              latestFix = probe;
-              health?.onFix();
-              cheapFixes++;
-              await apply(policy.onFix(probe, DateTime.now()), probe);
-            }
-          }
-
-          final decision = policy.onTick(latestFix, DateTime.now());
-          if (decision.needFreshFix) {
-            if (decision.switchTo != null) await apply(TrackingDecision(switchTo: decision.switchTo), null);
-            final cached = await cheapFix();
-            if (cached != null) cheapFixes++;
-            final current = cached != null ? Ok<LocationFix, String>(cached) : await _fixNow(fixRequest);
-            if (cached == null && current is Ok) activeFixes++;
-            if (current case Ok(value: final fix)) {
-              latestFix = fix;
-              health?.onFix();
-              await apply(policy.onFreshFix(fix, DateTime.now()), fix);
-            } else if (current case Err(value: final err)) {
-              // Aucune position obtenable : à l'arrêt, point « toujours là » avec la
-              // dernière position connue (pas de trou, pas de recherche à la minute).
-              final fallback = policy.lastRecordedFix;
-              if (policy.onFreshFixFailed().record && fallback != null) {
-                unawaited(TrackingLog.addThrottled('no-fix',
-                    'Position introuvable ($err) : point conservé à la dernière position (${policy.heartbeatsWithoutFix + 1}/3)',
-                    every: const Duration(minutes: 10)));
-                await record(fallback, withoutFix: true);
-              } else if (!controller.isClosed) {
-                controller.add(Err('No location available: $err'));
-              }
-            }
-            return;
-          }
-          await apply(decision, latestFix);
-        }));
+        unawaited(serialized(tick));
       });
+
+      if (power != null && sleepEnabled) {
+        wakeSub = power.wakes.listen((wake) {
+          health?.onTick();
+          switch (wake) {
+            case DeviceWake.alarm:
+              alarmWakes++;
+              wakeArmedFor = null;
+              unawaited(serialized(tick));
+            case DeviceWake.motion:
+              motionWakes++;
+              motionArmed = false;
+              unawaited(serialized(() => apply(policy.onMotion(DateTime.now()), null)));
+          }
+        }, onError: (Object e) {
+          unawaited(TrackingLog.addThrottled('sleep', 'Veille profonde : réveils interrompus ($e)'));
+        });
+        await keepSleepArmed();
+      }
 
       await for (final result in controller.stream) {
         yield result;
@@ -436,6 +539,8 @@ final class CreatePointFromLocationStreamWorkflow {
     } finally {
       timer?.cancel();
       await locationSub?.cancel();
+      await wakeSub?.cancel();
+      await leaveSleep();
     }
   }
 }
