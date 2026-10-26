@@ -38,6 +38,11 @@ Future<bool> canInstallApks() async =>
 Future<void> openInstallPermissionSettings() =>
     _channel.invokeMethod('openInstallSettings');
 
+/// Checks the APK natively (checksum, package name, signing key). Returns
+/// null when it is safe to install, otherwise the reason it is not.
+Future<String?> verifyUpdateApk(String path, {String? sha256}) =>
+    _channel.invokeMethod<String>('verify', {'path': path, 'sha256': sha256});
+
 Future<void> installApk(String path) =>
     _channel.invokeMethod('install', {'path': path});
 
@@ -93,6 +98,17 @@ class _UpdateProgressDialogState extends State<_UpdateProgressDialog> {
           if (mounted) setState(() => _progress = p);
         },
       );
+      if (!mounted) return;
+      final problem =
+          await verifyUpdateApk(_apkPath!, sha256: widget.update.sha256);
+      if (problem != null) {
+        // Never keep a rejected file: the next retry downloads it again.
+        final rejected = File(_apkPath!);
+        _apkPath = null;
+        if (await rejected.exists()) await rejected.delete();
+        if (mounted) setState(() => _error = problem);
+        return;
+      }
       if (!mounted) return;
       if (!await canInstallApks()) {
         setState(() => _needsPermission = true);
