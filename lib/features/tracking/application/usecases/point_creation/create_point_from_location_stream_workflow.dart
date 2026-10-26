@@ -251,7 +251,7 @@ final class CreatePointFromLocationStreamWorkflow {
 
     // Journal horaire : d'où viennent les positions à l'arrêt (pour mesurer le gain).
     var cheapFixes = 0, activeFixes = 0, passiveFixes = 0, modeSwitches = 0;
-    var alarmWakes = 0, motionWakes = 0;
+    var alarmWakes = 0, motionWakes = 0, quietPoints = 0;
     var statsSince = DateTime.now();
     DateTime? lastProbeAt;
 
@@ -335,13 +335,13 @@ final class CreatePointFromLocationStreamWorkflow {
     final controller = StreamController<Result<LocalPoint, String>>();
     bool busy = false;
 
-    Future<void> record(LocationFix fix, {bool withoutFix = false}) async {
+    Future<void> record(LocationFix fix, {bool withoutFix = false, bool quiet = false}) async {
       try {
         final timestamp = DateTime.now().toUtc();
         final pointResult =
             await _createPointFromLocationFix(fix, timestamp, userId).timeout(_createPointTimeout);
         if (pointResult case Ok(value: final point)) {
-          policy.recorded(fix, DateTime.now(), withoutFix: withoutFix);
+          policy.recorded(fix, DateTime.now(), withoutFix: withoutFix, quiet: quiet);
           if (!controller.isClosed) controller.add(Ok(point));
         } else if (pointResult case Err(value: final err)) {
           if (!controller.isClosed) controller.add(Err('Failed to create point: $err'));
@@ -443,13 +443,14 @@ final class CreatePointFromLocationStreamWorkflow {
         if (now.difference(statsSince) >= const Duration(hours: 1)) {
           unawaited(TrackingLog.add('Positions (1 h) : $cheapFixes en cache, $activeFixes actives, $passiveFixes reçues du flux, '
               '$modeSwitches changements de mode, mode ${policy.mode.name}'
-              '${sleepEnabled ? ', réveils : $alarmWakes alarme, $motionWakes mouvement' : ''}'));
+              '${sleepEnabled ? ', réveils : $alarmWakes alarme, $motionWakes mouvement, $quietPoints point(s) sans recherche' : ''}'));
           cheapFixes = 0;
           activeFixes = 0;
           passiveFixes = 0;
           modeSwitches = 0;
           alarmWakes = 0;
           motionWakes = 0;
+          quietPoints = 0;
           statsSince = now;
         }
 
@@ -474,6 +475,14 @@ final class CreatePointFromLocationStreamWorkflow {
         final decision = policy.onTick(latestFix, DateTime.now());
         if (decision.needFreshFix) {
           if (decision.switchTo != null) await apply(TrackingDecision(switchTo: decision.switchTo), null);
+          // Le capteur de mouvement veille et n'a rien vu bouger : le téléphone est au même
+          // endroit, inutile de lui demander une position (une sur quatre reste réelle).
+          final same = policy.lastRecordedFix;
+          if (same != null && policy.quietHeartbeatAllowed(motionWatched: sleepEnabled && motionArmed)) {
+            quietPoints++;
+            await record(same, quiet: true);
+            return;
+          }
           final cached = await cheapFix();
           if (cached != null) cheapFixes++;
           final current = cached != null ? Ok<LocationFix, String>(cached) : await _fixNow(fixRequest);

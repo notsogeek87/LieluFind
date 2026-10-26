@@ -304,6 +304,83 @@ void main() {
       expect(graced.onTick(fixAt(0, t), t).record, isTrue);
     });
 
+    group('point sans recherche de position', () {
+      /// Un point « toujours là » dû, enregistré comme le fait le flux.
+      void heartbeat({required bool quiet}) {
+        at(const Duration(minutes: 15));
+        final fix = quiet ? p.lastRecordedFix! : fixAt(1, t);
+        p.recorded(fix, t, quiet: quiet);
+      }
+
+      test('pas avant une première vraie position', () {
+        expect(p.quietHeartbeatAllowed(motionWatched: true), isFalse, reason: 'rien d\'enregistré');
+        start();
+        expect(p.quietHeartbeatAllowed(motionWatched: true), isTrue);
+      });
+
+      test('jamais sans capteur de mouvement qui veille', () {
+        start();
+        expect(p.quietHeartbeatAllowed(motionWatched: false), isFalse);
+      });
+
+      test('trois points repris, le quatrième exige une vraie position', () {
+        start();
+        for (var i = 0; i < 3; i++) {
+          expect(p.quietHeartbeatAllowed(motionWatched: true), isTrue, reason: 'point repris n°${i + 1}');
+          heartbeat(quiet: true);
+        }
+        expect(p.quietStreak, 3);
+        expect(p.quietHeartbeatAllowed(motionWatched: true), isFalse, reason: 'quota atteint');
+
+        heartbeat(quiet: false);
+        expect(p.quietStreak, 0);
+        expect(p.quietHeartbeatAllowed(motionWatched: true), isTrue, reason: 'le cycle repart');
+      });
+
+      test('le capteur de mouvement exige une vraie position au point suivant', () {
+        start();
+        heartbeat(quiet: true);
+        at(const Duration(minutes: 3));
+        p.onMotion(t);
+        p.switched(MotionMode.moving, t);
+        p.switched(MotionMode.still, t);
+        expect(p.quietHeartbeatAllowed(motionWatched: true), isFalse, reason: 'on a peut-être bougé');
+
+        p.recorded(fixAt(80, t), t);
+        expect(p.quietHeartbeatAllowed(motionWatched: true), isTrue, reason: 'nouvelle position connue');
+      });
+
+      test('un changement de mode exige aussi une vraie position', () {
+        start();
+        p.switched(MotionMode.moving, t);
+        p.switched(MotionMode.still, t);
+        expect(p.quietHeartbeatAllowed(motionWatched: true), isFalse);
+      });
+
+      test('en mouvement, jamais', () {
+        start();
+        p.switched(MotionMode.moving, t);
+        p.recorded(fixAt(60, t), t);
+        expect(p.quietHeartbeatAllowed(motionWatched: true), isFalse);
+      });
+
+      test('un point de repli faute de position ne passe pas pour une vraie position', () {
+        start();
+        p.onMotion(t);
+        p.recorded(p.lastRecordedFix!, t, withoutFix: true);
+        expect(p.quietHeartbeatAllowed(motionWatched: true), isFalse);
+      });
+
+      test('le point repris garde la dernière vraie position et fait repartir l\'échéance', () {
+        start();
+        final first = p.lastRecordedFix!;
+        at(const Duration(minutes: 15));
+        p.recorded(first, t, quiet: true);
+        expect(p.lastRecordedFix, same(first));
+        expect(p.untilHeartbeatDue(t), const Duration(minutes: 15));
+      });
+    });
+
     test('sans point enregistré, pas d\'attente', () {
       expect(p.untilHeartbeatDue(t), Duration.zero);
     });

@@ -39,6 +39,7 @@ final class AdaptiveTrackingPolicy {
     this.deliverySlack = const Duration(seconds: 30),
     this.stillFallbackGrace = const Duration(seconds: 90),
     this.maxHeartbeatsWithoutFix = 3,
+    this.maxQuietHeartbeats = 3,
     this.maxMovementThresholdMeters = 150,
     this.nightHeartbeat,
     this.isNight,
@@ -89,6 +90,11 @@ final class AdaptiveTrackingPolicy {
   /// veille profonde). Au-delà, on s'arrête plutôt que d'afficher une position périmée.
   final int maxHeartbeatsWithoutFix;
 
+  /// Immobile avec le capteur de mouvement : nombre maximal de points « toujours là »
+  /// consécutifs repris sans aucune recherche de position (le capteur n'a rien vu bouger).
+  /// Le suivant est une vraie position, qui borne l'erreur si le capteur a manqué un départ.
+  final int maxQuietHeartbeats;
+
   /// Plafond du seuil de déplacement adaptatif (voir [_moved]).
   final double maxMovementThresholdMeters;
 
@@ -107,6 +113,11 @@ final class AdaptiveTrackingPolicy {
   DateTime? _lastMoveAt;
   DateTime? _lastFreshFixRequestAt;
   int _heartbeatsWithoutFix = 0;
+  int _quietStreak = 0;
+
+  /// Une vraie position est exigée avant le prochain point sans recherche : au
+  /// démarrage, après un mouvement détecté et à chaque changement de mode.
+  bool _needRealFix = true;
 
   DateTime? get lastRecordedAt => _lastRecordedAt;
   LocationFix? get lastRecordedFix => _lastRecordedFix;
@@ -194,6 +205,7 @@ final class AdaptiveTrackingPolicy {
   /// mouvement sans attendre de position. Fausse alerte : retour en immobile après
   /// [stillAfter] sans déplacement, comme d'habitude.
   TrackingDecision onMotion(DateTime now) {
+    _needRealFix = true;
     if (mode == MotionMode.moving) return TrackingDecision.none;
     _lastMoveAt = now;
     return const TrackingDecision(switchTo: MotionMode.moving);
@@ -208,8 +220,28 @@ final class AdaptiveTrackingPolicy {
     return left.isNegative ? Duration.zero : left;
   }
 
+  int get quietStreak => _quietStreak;
+
+  /// Immobile : le point « toujours là » dû peut-il reprendre la dernière position
+  /// enregistrée, sans rien demander au téléphone ? Oui si le capteur de mouvement
+  /// ([motionWatched]) veille et n'a rien signalé depuis la dernière vraie position,
+  /// dans la limite de [maxQuietHeartbeats] points d'affilée.
+  bool quietHeartbeatAllowed({required bool motionWatched}) =>
+      motionWatched &&
+      mode == MotionMode.still &&
+      _lastRecordedFix != null &&
+      !_needRealFix &&
+      _quietStreak < maxQuietHeartbeats;
+
   /// Le point a bien été créé. [withoutFix] : point de repli sans nouvelle position.
-  void recorded(LocationFix fix, DateTime now, {bool withoutFix = false}) {
+  /// [quiet] : point repris sans recherche (voir [quietHeartbeatAllowed]).
+  void recorded(LocationFix fix, DateTime now, {bool withoutFix = false, bool quiet = false}) {
+    if (quiet) {
+      _quietStreak++;
+    } else if (!withoutFix) {
+      _quietStreak = 0;
+      _needRealFix = false;
+    }
     _lastRecordedFix = fix;
     _lastRecordedAt = now;
     _heartbeatsWithoutFix = withoutFix ? _heartbeatsWithoutFix + 1 : 0;
@@ -217,6 +249,7 @@ final class AdaptiveTrackingPolicy {
 
   void switched(MotionMode to, DateTime now) {
     mode = to;
+    _needRealFix = true;
     if (to == MotionMode.moving) _lastMoveAt = now;
   }
 }
