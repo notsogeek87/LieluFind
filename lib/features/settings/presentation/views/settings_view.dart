@@ -810,7 +810,9 @@ final class _PeopleOnMapDialog extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final hidden = ref.watch(hiddenFamilyIdsProvider);
-    final members = [...(ref.watch(familyLocationsProvider).value ?? const [])]
+    final members = [
+      ...(ref.watch(familyLocationsProvider).value?.members ?? const [])
+    ]
       ..sort((a, b) => a.shortName.compareTo(b.shortName));
     final notifier = ref.read(hiddenFamilyIdsProvider.notifier);
 

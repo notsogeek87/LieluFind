@@ -124,24 +124,6 @@ class LoginStepWidget extends StatelessWidget {
                   style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
               ),
-            const SizedBox(height: 24),
-            TextButton(
-              onPressed: () => showDialog(
-                context: context,
-                builder: (_) => AlertDialog(
-                  title: const Text('Coming Soon'),
-                  content:
-                      const Text('Email/password login is not supported yet.'),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: const Text('OK'),
-                    )
-                  ],
-                ),
-              ),
-              child: const Text('Use Email / Password'),
-            ),
           ],
         ),
       ),
