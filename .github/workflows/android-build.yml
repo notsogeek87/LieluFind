@@ -83,17 +83,35 @@ jobs:
       - name: Tests (famille, tracking)
         run: flutter test test/features
 
-      # Clé de debug committée (android/ci-debug.p12), comme pour Backlog : même signature à
-      # chaque build, donc chaque APK s'installe par-dessus le précédent sans désinstaller.
-      # À remplacer par une vraie clé secrète si l'app est un jour distribuée largement.
+      # main : clé de release secrète (secrets ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
+      # ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD). Sans elle, le build de main échoue : une release
+      # signée avec une clé publique pourrait être imitée par n'importe qui.
+      # Autres branches : clé de debug committée (android/ci-debug.p12), APK de test seulement.
       - name: Configurer la signature
+        env:
+          IS_MAIN: ${{ github.ref_name == 'main' }}
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          cat > android/keystore.properties <<'PROPS'
-          storePassword=android
-          keyPassword=android
-          keyAlias=androiddebugkey
-          storeFile=../ci-debug.p12
-          PROPS
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > android/release.p12
+            {
+              echo "storePassword=$KEYSTORE_PASSWORD"
+              echo "keyPassword=$KEY_PASSWORD"
+              echo "keyAlias=$KEY_ALIAS"
+              echo "storeFile=../release.p12"
+            } > android/keystore.properties
+            echo "Signature : clé de release."
+          elif [ "$IS_MAIN" = "true" ]; then
+            echo "::error::Secret ANDROID_KEYSTORE_BASE64 absent : impossible de signer la release de main."
+            exit 1
+          else
+            printf '%s\n' storePassword=android keyPassword=android \
+              keyAlias=androiddebugkey storeFile=../ci-debug.p12 > android/keystore.properties
+            echo "Signature : clé de debug committée (APK de test)."
+          fi
 
       # versionCode = run_number (strictement croissant), versionName = version du pubspec,
       # tag de release v<version>.<run_number>.
@@ -144,10 +162,10 @@ jobs:
           2. Ouvre-le. Si Android bloque l'installation, autorise la source (navigateur ou gestionnaire de fichiers) à installer des applications inconnues.
           3. Touche « Installer ».
 
-          Tous les APK ont la même clé de signature : une nouvelle version s'installe par-dessus l'ancienne, tes réglages sont conservés. Si Android refuse (« app non installée »), désinstalle l'ancienne version une fois, puis réinstalle.
+          Tous les APK ont la même clé de signature : une nouvelle version s'installe par-dessus l'ancienne, tes réglages sont conservés. L'app vérifie l'empreinte SHA-256 et la signature de chaque mise à jour avant de l'installer.
 
           ---
-          Run #${{ github.run_number }} (${{ github.sha }}). Signé avec la clé de debug committée.
+          Run #${{ github.run_number }} (${{ github.sha }}). Signé avec la clé de release LieluFind.
           NOTES
           gh release create "$TAG" \
             "${{ steps.apk.outputs.path }}" \

@@ -48,3 +48,6 @@ app.*.map.json
 *.jks
 keystore.properties
 key.properties
+
+# Clé de release décodée en CI depuis les secrets
+android/release.p12

@@ -9,7 +9,40 @@ const _latestReleaseUrl =
 final class AppUpdate {
   final String versionName;
   final String apkUrl;
-  const AppUpdate({required this.versionName, required this.apkUrl});
+
+  /// Hex SHA-256 GitHub computed for the asset, checked before installing.
+  final String? sha256;
+  const AppUpdate({required this.versionName, required this.apkUrl, this.sha256});
+}
+
+/// GitHub exposes each release asset's checksum as `digest: "sha256:<hex>"`.
+/// Returns the hex part, or null when absent or malformed.
+String? sha256FromAssetDigest(Object? digest) {
+  if (digest is! String) return null;
+  final match = RegExp(r'^sha256:([0-9a-fA-F]{64})$').firstMatch(digest.trim());
+  return match?.group(1)?.toLowerCase();
+}
+
+/// The update offered by a `releases/latest` payload, if its build is newer
+/// than [installedBuild] and it carries an APK asset.
+AppUpdate? updateFromRelease(Map<String, dynamic> data, int? installedBuild) {
+  final tag = data['tag_name'] as String? ?? '';
+  final latest = _buildFromTag(tag);
+  if (installedBuild == null || latest == null || latest <= installedBuild) {
+    return null;
+  }
+  for (final asset in (data['assets'] as List?) ?? const []) {
+    if (asset is! Map) continue;
+    final url = asset['browser_download_url'] as String?;
+    if (url != null && url.endsWith('.apk')) {
+      return AppUpdate(
+        versionName: tag,
+        apkUrl: url,
+        sha256: sha256FromAssetDigest(asset['digest']),
+      );
+    }
+  }
+  return null;
 }
 
 /// Release tags are `v<pubspec version>.<run_number>` and the installed
@@ -65,16 +98,7 @@ Future<UpdateCheck> runUpdateCheck() async {
           error: 'Unreadable release tag "$tag"');
     }
 
-    AppUpdate? update;
-    if (installed != null && latest > installed) {
-      for (final asset in (data['assets'] as List?) ?? const []) {
-        final url = (asset as Map)['browser_download_url'] as String?;
-        if (url != null && url.endsWith('.apk')) {
-          update = AppUpdate(versionName: tag, apkUrl: url);
-          break;
-        }
-      }
-    }
+    final update = updateFromRelease(data, installed);
     return UpdateCheck(
         installedVersion: version,
         installedBuild: installed,
