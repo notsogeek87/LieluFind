@@ -80,8 +80,19 @@ jobs:
       - name: Générer le code (build_runner)
         run: dart run build_runner build --delete-conflicting-outputs
 
-      - name: Tests (famille, tracking)
-        run: flutter test test/features
+      - name: Analyse statique
+        run: flutter analyze
+
+      # Migrations de la base : chaque version de schéma doit migrer vers les suivantes.
+      - name: Tests (fonctionnalités, migrations de base)
+        run: flutter test test/features test/drift
+
+      # Un changement de tables sans nouvelle version de schéma (ou sans snapshot
+      # drift_schemas/) régénère ces fichiers : le diff fait échouer le build.
+      - name: Schéma de base à jour
+        run: |
+          dart run drift_dev make-migrations
+          git diff --exit-code -- drift_schemas test/drift lib/core/data/drift/database/sqlite_client.steps.dart
 
       # main : clé de release secrète (secrets ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
       # ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD). Sans elle, le build de main échoue : une release

@@ -57,10 +57,14 @@ t'arrêtant au premier échec :
    (régénère routeurs, freezed, json, riverpod, drift — AVANT analyze et
    tests, sinon erreurs fantômes sur du code non généré)
 3. flutter analyze
-4. flutter test test/features
+4. flutter test test/features test/drift
    (la commande EXACTE de la CI ; « pertinent » n'existe pas ici : la CI joue
-   tout test/features, pas seulement le fichier modifié)
-5. flutter build apk --release --flavor foss
+   tout test/features et les migrations test/drift, pas seulement le fichier
+   modifié)
+5. dart run drift_dev make-migrations, puis aucun diff dans drift_schemas/,
+   test/drift/ ni sqlite_client.steps.dart (sinon : schéma modifié sans
+   nouvelle version, à corriger avant de pousser)
+6. flutter build apk --release --flavor foss
    (la variante réellement construite par la CI ; obligatoire au minimum si
    pubspec*, android/, assets/ ou l'icône ont changé)
 
