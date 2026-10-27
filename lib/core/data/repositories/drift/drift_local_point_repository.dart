@@ -263,7 +263,8 @@ final class DriftPointLocalRepository implements IPointLocalRepository {
                 _database.pointsTable.userId.equals(userId)))
           .getSingle();
 
-      return countQuery.read(_database.pointsTable.id.count()) ?? 0;
+      final count = countQuery.read(_database.pointsTable.id.count());
+      return count ?? 0;
     } catch (e) {
       debugPrint("Error fetching not uploaded points count: $e");
       rethrow;

@@ -30,12 +30,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # flutter-version-file ne sait lire que pubspec.yaml/.fvmrc : sur ce fichier texte,
+      # l'action prenait silencieusement la dernière stable. On passe la version explicitement.
+      - name: Lire .flutter-version
+        id: flutter_version
+        run: echo "version=$(tr -d '[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
+
       - name: Set up Flutter (version de .flutter-version)
         uses: subosito/flutter-action@v2
         with:
-          flutter-version-file: .flutter-version
+          flutter-version: ${{ steps.flutter_version.outputs.version }}
           channel: stable
           cache: true
+
+      - name: Vérifier la version de Flutter
+        env:
+          EXPECTED: ${{ steps.flutter_version.outputs.version }}
+        run: |
+          ACTUAL=$(flutter --version --machine | python3 -c 'import json,sys; print(json.load(sys.stdin)["frameworkVersion"])')
+          echo "Flutter $ACTUAL (attendu $EXPECTED)"
+          [ "$ACTUAL" = "$EXPECTED" ] || { echo "::error::Flutter $ACTUAL au lieu de $EXPECTED"; exit 1; }
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -80,8 +94,19 @@ jobs:
       - name: Générer le code (build_runner)
         run: dart run build_runner build --delete-conflicting-outputs
 
-      - name: Tests (famille, tracking)
-        run: flutter test test/features
+      - name: Analyse statique
+        run: flutter analyze
+
+      # Migrations de la base : chaque version de schéma doit migrer vers les suivantes.
+      - name: Tests (fonctionnalités, migrations de base)
+        run: flutter test test/features test/drift
+
+      # Un changement de tables sans nouvelle version de schéma (ou sans snapshot
+      # drift_schemas/) régénère ces fichiers : le diff fait échouer le build.
+      - name: Schéma de base à jour
+        run: |
+          dart run drift_dev make-migrations
+          git diff --exit-code -- drift_schemas test/drift lib/core/data/drift/database/sqlite_client.steps.dart
 
       # main : clé de release secrète (secrets ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
       # ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD). Sans elle, le build de main échoue : une release
