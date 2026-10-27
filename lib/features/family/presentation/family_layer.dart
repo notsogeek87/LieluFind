@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:dio/dio.dart';
 import 'package:dawarich/core/di/providers/core_providers.dart';
 import 'package:dawarich/core/network/secondary_account.dart';
+import 'package:dawarich/features/family/domain/models/family_locations.dart';
 import 'package:dawarich/features/family/domain/models/family_member_location.dart';
 import 'package:dawarich/features/family/presentation/family_photos.dart';
 import 'package:dawarich/features/family/presentation/family_visibility.dart';
@@ -21,12 +22,14 @@ import 'package:url_launcher/url_launcher.dart';
 const _refreshInterval = Duration(seconds: 30);
 
 /// Polls the family locations endpoint so every member is on the map as soon
-/// as it opens, with no tap needed.
+/// as it opens, with no tap needed. A failed refresh keeps the last members
+/// and flags the outage (see [FamilyLocations]) instead of emptying the map.
 final familyLocationsProvider =
-    StreamProvider.autoDispose<List<FamilyMemberLocation>>((ref) async* {
+    StreamProvider.autoDispose<FamilyLocations>((ref) async* {
   final dio = await ref.watch(dioClientProvider.future);
 
-  Future<List<FamilyMemberLocation>> fetch() async {
+  /// Null when the server could not be reached (see [isFamilyOutage]).
+  Future<List<FamilyMemberLocation>?> fetch() async {
     final result = await dio.getJson<List<FamilyMemberLocation>>(
       '/api/v1/families/locations',
       map: (json) {
@@ -40,7 +43,7 @@ final familyLocationsProvider =
     );
     return switch (result) {
       Ok(value: final v) => v,
-      Err() => const [],
+      Err(value: final e) => isFamilyOutage(e.statusCode) ? null : const [],
     };
   }
 
@@ -69,13 +72,28 @@ final familyLocationsProvider =
         .toList();
   }
 
-  Future<List<FamilyMemberLocation>> fetchAll() async {
-    final primary = await fetch();
-    final extra = await fetchSecondary();
+  Future<List<FamilyMemberLocation>?> fetchAll() async {
+    final List<FamilyMemberLocation>? primary;
+    try {
+      primary = await fetch();
+    } catch (_) {
+      return null; // an exception must never end the polling loop
+    }
+    if (primary == null) return null;
+    List<FamilyMemberLocation> extra;
+    try {
+      extra = await fetchSecondary();
+    } catch (_) {
+      extra = const [];
+    }
     if (extra.isEmpty) return primary;
     final seen = primary.map((m) => m.userId).toSet();
     return [...primary, ...extra.where((m) => seen.add(m.userId))];
   }
+
+  FamilyLocations? latest;
+  Future<FamilyLocations> refresh() async =>
+      latest = FamilyLocations.next(latest, await fetchAll(), DateTime.now());
 
   // Ne jamais interroger le serveur quand la carte n'est pas à l'écran : le
   // service de suivi garde le processus vivant (et le CPU éveillé), donc une
@@ -88,7 +106,7 @@ final familyLocationsProvider =
   bool inForeground() =>
       WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
 
-  yield await fetchAll();
+  yield await refresh();
   while (true) {
     if (inForeground()) {
       await Future<void>.delayed(_refreshInterval);
@@ -97,7 +115,7 @@ final familyLocationsProvider =
       resumed = Completer<void>();
     }
     if (!inForeground()) continue;
-    yield await fetchAll();
+    yield await refresh();
   }
 });
 
@@ -236,7 +254,8 @@ final class _FamilyLayerState extends ConsumerState<FamilyLayer> {
   @override
   Widget build(BuildContext context) {
     final hidden = ref.watch(hiddenFamilyIdsProvider);
-    final members = (ref.watch(familyLocationsProvider).value ?? const [])
+    final members = (ref.watch(familyLocationsProvider).value?.members ??
+            const <FamilyMemberLocation>[])
         .where((m) => !hidden.contains(m.userId))
         .toList();
     if (members.isEmpty) return const SizedBox.shrink();
