@@ -21,7 +21,8 @@ client Android communautaire de Dawarich, et tu dois préserver sa capacité
 - C'est une app Flutter : le code vit dans lib/ (Dart). android/ (Kotlin/Gradle)
   n'est touché que pour le manifeste, les plugins ou les services de fond
   (flutter_background_service, workmanager).
-- La version de Flutter est imposée par .flutter-version : ne pas la changer.
+- La version de Flutter est imposée par .flutter-version (lue et vérifiée par la
+  CI) : ne pas la changer, et faire la barrière locale avec cette version.
 - Vérifie l'état Git pour ne pas écraser des changements existants.
 
 ## 2. Pendant le développement
