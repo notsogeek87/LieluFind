@@ -6,7 +6,9 @@ import 'package:dio/dio.dart';
 import 'package:dawarich/core/di/providers/core_providers.dart';
 import 'package:dawarich/core/network/secondary_account.dart';
 import 'package:dawarich/features/family/domain/models/family_locations.dart';
+import 'package:dawarich/core/di/providers/session_providers.dart';
 import 'package:dawarich/features/family/domain/models/family_member_location.dart';
+import 'package:dawarich/features/family/domain/self_member.dart';
 import 'package:dawarich/features/family/presentation/family_photos.dart';
 import 'package:dawarich/features/family/presentation/family_visibility.dart';
 import 'package:flutter/material.dart';
@@ -116,6 +118,20 @@ final familyLocationsProvider =
     }
     if (!inForeground()) continue;
     yield await refresh();
+  }
+});
+
+/// The phone's own position, so "me" is always on the map with a name and a
+/// photo whatever the server returns (it never lists the signed-in user).
+final selfPositionProvider = StreamProvider.autoDispose<LatLng>((ref) async* {
+  try {
+    final last = await Geolocator.getLastKnownPosition();
+    if (last != null) yield LatLng(last.latitude, last.longitude);
+    yield* Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(distanceFilter: 25),
+    ).map((p) => LatLng(p.latitude, p.longitude));
+  } catch (_) {
+    // No permission or no fix: the blue dot and the family still work.
   }
 });
 
@@ -254,8 +270,21 @@ final class _FamilyLayerState extends ConsumerState<FamilyLayer> {
   @override
   Widget build(BuildContext context) {
     final hidden = ref.watch(hiddenFamilyIdsProvider);
-    final members = (ref.watch(familyLocationsProvider).value?.members ??
-            const <FamilyMemberLocation>[])
+    final user = ref.watch(authenticatedUserProvider);
+    final myPosition = ref.watch(selfPositionProvider).value;
+    final me = user == null || myPosition == null
+        ? null
+        : selfMember(
+            serverUserId: user.remoteId,
+            localUserId: user.id,
+            email: user.email,
+            position: myPosition,
+            updatedAt: DateTime.now(),
+          );
+    final members = withSelf(
+            ref.watch(familyLocationsProvider).value?.members ??
+                const <FamilyMemberLocation>[],
+            me)
         .where((m) => !hidden.contains(m.userId))
         .toList();
     if (members.isEmpty) return const SizedBox.shrink();
@@ -263,7 +292,8 @@ final class _FamilyLayerState extends ConsumerState<FamilyLayer> {
     final mapController = MapController.maybeOf(context);
     final camera = MapCamera.of(context);
 
-    if (!_fitted) {
+    // Wait for the family answer: framing on the phone alone would skip it.
+    if (!_fitted && ref.watch(familyLocationsProvider).hasValue) {
       _fitted = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _fitEveryone(mapController, members);
