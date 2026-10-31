@@ -1,8 +1,12 @@
+import 'dart:io';
+
 import 'package:dawarich/core/data/repositories/local_point_repository_interfaces.dart';
 import 'package:dawarich/core/domain/models/point/local/local_point.dart';
 import 'package:dawarich/core/domain/models/point/local/local_point_geometry.dart';
 import 'package:dawarich/core/domain/models/point/local/local_point_properties.dart';
+import 'package:dawarich/core/network/repositories/api_point_repository.dart';
 import 'package:dawarich/core/network/repositories/api_point_repository_interfaces.dart';
+import 'package:dio/dio.dart';
 import 'package:dawarich/features/batch/application/usecases/batch_upload_workflow_usecase.dart';
 import 'package:dawarich/features/tracking/data/data_transfer_objects/point/upload/dawarich_point_batch_dto.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -70,6 +74,8 @@ void main() {
     final result = await workflow([for (var i = 1; i <= 40; i++) _point(i)], 1);
 
     expect(result, isA<Err>());
+    expect((result as Err).value, contains('connection error'),
+        reason: 'la cause réelle doit apparaître dans le journal');
     expect(local.uploaded, isEmpty, reason: 'les points restent en local');
     // 1 envoi du lot + 3 essais individuels, au lieu de 1 + 40 timeouts.
     expect(api.calls, 4);
@@ -89,5 +95,35 @@ void main() {
 
     expect(result, isA<Ok>());
     expect(local.uploaded, unorderedEquals([1, 2, 3, 4, 5]));
+  });
+
+  group('cause d\'un envoi raté', () {
+    final req = RequestOptions(path: '/api/v1/points');
+
+    test('pas de réseau : type et erreur système visibles', () {
+      final msg = ApiPointRepository.describeUploadFailure(DioException.connectionError(
+        requestOptions: req,
+        reason: 'x',
+        error: const SocketException("Failed host lookup: 'where.lielu.eu'"),
+      ));
+      expect(msg, allOf(contains('connectionError'), contains('Failed host lookup')));
+    });
+
+    test('délai dépassé', () {
+      final msg = ApiPointRepository.describeUploadFailure(DioException.connectionTimeout(
+        requestOptions: req,
+        timeout: const Duration(seconds: 30),
+      ));
+      expect(msg, contains('connectionTimeout'));
+    });
+
+    test('refus du serveur : code HTTP', () {
+      final msg = ApiPointRepository.describeUploadFailure(DioException.badResponse(
+        statusCode: 502,
+        requestOptions: req,
+        response: Response(requestOptions: req, statusCode: 502),
+      ));
+      expect(msg, startsWith('HTTP 502'));
+    });
   });
 }

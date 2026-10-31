@@ -70,6 +70,7 @@ final class BatchUploadWorkflowUseCase {
       int failedCount = 0;
       int uploadedCount = 0;
       int consecutiveFailures = 0;
+      String? lastError;
 
       for (final LocalPoint point in failedChunks) {
         // Serveur ou réseau injoignable : inutile d'enchaîner des dizaines de
@@ -92,6 +93,7 @@ final class BatchUploadWorkflowUseCase {
 
           failedCount++;
           consecutiveFailures++;
+          lastError = error;
         } else {
           consecutiveFailures = 0;
           await _markAsUploaded([point.id], userId);
@@ -101,7 +103,8 @@ final class BatchUploadWorkflowUseCase {
       }
 
       if (failedCount > 0) {
-        return Err("$failedCount point(s) failed to upload after retrying.");
+        return Err("$failedCount point(s) failed to upload after retrying"
+            "${lastError != null ? ' ($lastError)' : ''}.");
       }
     }
 

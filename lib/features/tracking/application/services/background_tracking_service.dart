@@ -373,6 +373,35 @@ final class BackgroundTrackingService {
     }
   }
 
+  /// Appelé par la tâche WorkManager périodique, app fermée : relance le service
+  /// s'il a été tué alors que le tracking automatique est activé.
+  static Future<RestoreOutcome> reviveIfDead({required bool automaticTracking}) async {
+    try {
+      await installConfigurationOnce();
+      return await TrackingServiceRestorer(
+        readAutomaticTracking: () async => automaticTracking,
+        isRunning: () => FlutterBackgroundService().isRunning(),
+        startService: () async {
+          // Android peut refuser un service de premier plan lancé depuis l'arrière-plan
+          // (exception de plateforme) : on le journalise, la tâche suivante réessaiera.
+          try {
+            final result = await start();
+            return switch (result) { Ok() => null, Err(value: final m) => m };
+          } catch (e) {
+            return '$e';
+          }
+        },
+        pingHealth: () async => null,
+        restartTracking: () async {},
+        log: (m) => unawaited(TrackingLog.add(m)),
+      ).reviveIfDead();
+    } catch (e, s) {
+      if (kDebugMode) debugPrint('[Tracker] reviveIfDead failed: $e\n$s');
+      unawaited(TrackingLog.add('Contrôle du service par la tâche de fond impossible : $e'));
+      return RestoreOutcome.startFailed;
+    }
+  }
+
   /// Interroge l'isolate de fond ; `null` s'il ne répond pas dans les 5 s.
   static Future<Map<String, Object?>?> _pingHealth() async {
     final service = FlutterBackgroundService();

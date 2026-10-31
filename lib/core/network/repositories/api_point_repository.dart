@@ -7,6 +7,7 @@ import 'package:dawarich/core/point_data/data/data_transfer_objects/api/api_poin
 import 'package:dawarich/core/network/repositories/api_point_repository_interfaces.dart';
 import 'package:dawarich/features/timeline/data/data_transfer_objects/slim_api_point_dto.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:option_result/option_result.dart';
 
@@ -43,8 +44,18 @@ final class ApiPointRepository implements IApiPointRepository {
       }
     } on DioException catch (e) {
       // network / timeout / cancellation / 4xx/5xx
-      return Err(e.message ?? 'The API rejected the batch.');
+      return Err(describeUploadFailure(e));
     }
+  }
+
+  /// Cause lisible d'un envoi raté : sans elle, le journal de terrain ne dit pas
+  /// si le téléphone n'avait plus de réseau, si le DNS échouait ou si le serveur a refusé.
+  @visibleForTesting
+  static String describeUploadFailure(DioException e) {
+    final status = e.response?.statusCode;
+    if (status != null) return 'HTTP $status${e.message != null ? ' (${e.message})' : ''}';
+    final cause = e.error ?? e.message;
+    return cause == null ? e.type.name : '${e.type.name} : $cause';
   }
 
   Future<void> _mirrorSafely(DawarichPointBatchDto batch) async {

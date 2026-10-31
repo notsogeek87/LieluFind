@@ -83,4 +83,22 @@ final class TrackingServiceRestorer {
 
     return RestoreOutcome.healthy;
   }
+
+  /// Contrôle périodique depuis la tâche de fond (WorkManager), app fermée.
+  /// Android peut tuer le service sans prévenir ; son superviseur meurt avec lui et,
+  /// sur le terrain, plus rien ne le relançait avant l'ouverture de l'app (jusqu'à
+  /// 11 h de suivi perdues). Ne relance qu'un service mort : un service vivant a son
+  /// propre superviseur, et l'isolate de la tâche ne peut pas l'interroger.
+  Future<RestoreOutcome> reviveIfDead() async {
+    if (!await readAutomaticTracking()) return RestoreOutcome.disabled;
+    if (await isRunning()) return RestoreOutcome.healthy;
+
+    final failure = await startService();
+    if (failure != null) {
+      log('Relance par la tâche de fond refusée : $failure (réglage conservé)');
+      return RestoreOutcome.startFailed;
+    }
+    log('Service retrouvé arrêté : relancé par la tâche de fond');
+    return RestoreOutcome.started;
+  }
 }

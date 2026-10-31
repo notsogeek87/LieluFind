@@ -2,12 +2,14 @@ import 'package:dawarich/core/di/providers/core_providers.dart';
 import 'package:dawarich/core/di/providers/session_providers.dart';
 import 'package:dawarich/core/di/providers/usecase_providers.dart';
 import 'package:dawarich/core/domain/models/user.dart';
+import 'package:dawarich/features/tracking/application/services/background_tracking_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// Background bootstrap for batch upload work.
 ///
-/// Runs inside a WorkManager periodic task (~15 min). Handles:
+/// Runs inside a WorkManager periodic task (1 h). Handles:
+///  0. **Service guard** – restarts the tracking service if Android killed it.
 ///  1. **Threshold upload** – batch has enough points to upload.
 ///  2. **Expiration upload** – oldest un-uploaded point exceeds the
 ///     configured time window.
@@ -37,6 +39,10 @@ final class BatchUploadBootstrap {
       final getSettings =
           await container.read(getTrackerSettingsUseCaseProvider.future);
       final settings = await getSettings(user.id);
+
+      // Avant l'envoi, et même sans réseau : un service tué par Android ne
+      // revenait qu'à l'ouverture de l'app.
+      await BackgroundTrackingService.reviveIfDead(automaticTracking: settings.automaticTracking);
 
       final localRepo =
           await container.read(pointLocalRepositoryProvider.future);

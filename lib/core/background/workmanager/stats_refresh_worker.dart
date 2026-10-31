@@ -56,7 +56,8 @@ Future<void> initializeAndRegisterStatsWorker() async {
 
 /// Registers the periodic batch upload task.
 ///
-/// Filet de sécurité : le service de suivi envoie déjà ses points lui-même. Chaque
+/// Filet de sécurité : relance le service de suivi s'il a été tué, et envoie les
+/// points restés en attente (le service les envoie déjà lui-même). Chaque
 /// exécution démarre un moteur Flutter complet, d'où une fois par heure seulement.
 /// Handles:
 ///  - Threshold-based uploads (batch is full)
@@ -71,9 +72,8 @@ Future<void> registerBatchUploadWorker() async {
     kBatchUploadTask,
     kBatchUploadTask,
     frequency: const Duration(hours: 1),
-    constraints: Constraints(
-      networkType: NetworkType.connected,
-    ),
+    // Pas de contrainte réseau : la tâche relance aussi le service de suivi tué par
+    // Android, ce qui doit marcher hors ligne. Sans réseau, l'envoi échoue vite.
     // update : remplace la tâche déjà planifiée à 15 min sur les téléphones existants.
     existingWorkPolicy: ExistingPeriodicWorkPolicy.update,
   );

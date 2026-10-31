@@ -78,4 +78,36 @@ void main() {
     expect(await f.restorer.restore(), RestoreOutcome.healthy);
     expect(f.starts + f.restarts, 0);
   });
+
+  group('tâche de fond (reviveIfDead)', () {
+    test('service tué par Android, app fermée : relancé', () async {
+      final f = _Fake();
+      expect(await f.restorer.reviveIfDead(), RestoreOutcome.started);
+      expect(f.starts, 1);
+      expect(f.running, isTrue);
+      expect(f.logs.single, contains('relancé par la tâche de fond'));
+    });
+
+    test('service vivant : on n\'y touche pas, même s\'il ne répond pas au contrôle', () async {
+      final f = _Fake()
+        ..running = true
+        ..health = null;
+      expect(await f.restorer.reviveIfDead(), RestoreOutcome.healthy);
+      expect(f.starts + f.restarts, 0);
+      expect(f.logs, isEmpty);
+    });
+
+    test('tracking désactivé : aucun démarrage', () async {
+      final f = _Fake()..automaticTracking = false;
+      expect(await f.restorer.reviveIfDead(), RestoreOutcome.disabled);
+      expect(f.starts, 0);
+    });
+
+    test('démarrage refusé : réglage conservé, cause journalisée', () async {
+      final f = _Fake()..startFailure = 'ForegroundServiceStartNotAllowedException';
+      expect(await f.restorer.reviveIfDead(), RestoreOutcome.startFailed);
+      expect(f.automaticTracking, isTrue);
+      expect(f.logs.single, allOf(contains('ForegroundServiceStartNotAllowedException'), contains('réglage conservé')));
+    });
+  });
 }
